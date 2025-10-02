@@ -45,35 +45,35 @@ const prompt = ai.definePrompt({
   name: 'smartRenewalNotificationsPrompt',
   input: {schema: SmartRenewalNotificationsInputSchema},
   output: {schema: SmartRenewalNotificationsOutputSchema},
-  prompt: `You are an AI assistant that helps IPTV resellers manage their business by generating timely notifications about expiring client subscriptions and panels nearing renewal.
+  prompt: `Você é um assistente de IA que ajuda revendedores de IPTV a gerenciar seus negócios, gerando notificações oportunas sobre assinaturas de clientes expirando e painéis perto da renovação.
 
-Generate concise and informative notifications based on the following data:
+Gere notificações concisas e informativas com base nos seguintes dados:
 
-Expiring Clients:
+Clientes Expirando em Breve:
 {{#if clientsExpiringSoon}}
 {{#each clientsExpiringSoon}}
-- Client: {{clientName}} (ID: {{clientId}}), Plan: {{planName}}, Renewal Date: {{renewalDate}}
+- Cliente: {{clientName}} (ID: {{clientId}}), Plano: {{planName}}, Data de Renovação: {{renewalDate}}
 {{/each}}
 {{else}}
-- No clients expiring soon.
+- Nenhum cliente expirando em breve.
 {{/if}}
 
-Panels Nearing Renewal:
+Painéis Precisando de Renovação:
 {{#if panelsNeedingRenewal}}
 {{#each panelsNeedingRenewal}}
-- Panel: {{panelName}} (ID: {{panelId}}), Renewal Date: {{renewalDate}}
+- Painel: {{panelName}} (ID: {{panelId}}), Data de Renovação: {{renewalDate}}
 {{/each}}
 {{else}}
-- No panels nearing renewal.
+- Nenhum painel precisando de renovação.
 {{/if}}
 
-Compose a list of notifications for the reseller, highlighting the clients and panels that require attention. Each notification should be clear and actionable.
+Componha uma lista de notificações para o revendedor, destacando os clientes e painéis que requerem atenção. Cada notificação deve ser clara e acionável.
 
-Example Notifications:
-- "Alert: Client John Doe's subscription for the Premium plan expires on 2024-07-15. Contact them to renew."
-- "Urgent: Panel XUI-001 renewal is due on 2024-07-20. Ensure payment to avoid service disruption."
+Exemplos de Notificação:
+- "Alerta: A assinatura do cliente João da Silva para o plano Premium expira em 2024-07-15. Entre em contato para renovar."
+- "Urgente: A renovação do painel XUI-001 vence em 2024-07-20. Garanta o pagamento para evitar a interrupção do serviço."
 
-Output ONLY a JSON array of strings. Do NOT include any other text.
+Produza APENAS um array JSON de strings. NÃO inclua nenhum outro texto.
 `,config: {
     safetySettings: [
       {
