@@ -13,7 +13,11 @@ export type Panel = {
   name: string;
   type: 'XUI' | 'Xtream' | 'Other';
   login: string;
-  monthlyCost: number;
+  renewalDate: string;
+  costType: 'fixed' | 'perActive';
+  monthlyCost?: number;
+  costPerActive?: number;
+  activeClients?: number; // Only relevant for 'perActive'
 };
 
 export type Plan = {

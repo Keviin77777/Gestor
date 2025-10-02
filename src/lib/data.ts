@@ -9,8 +9,8 @@ export const clients: Client[] = [
 ];
 
 export const panels: Panel[] = [
-    { id: 'p1', name: 'Painel Principal', type: 'XUI', login: 'admin', monthlyCost: 150 },
-    { id: 'p2', name: 'Painel Secundário', type: 'Xtream', login: 'user1', monthlyCost: 100 },
+    { id: 'p1', name: 'Painel Principal', type: 'XUI', login: 'admin', renewalDate: '2024-08-01', costType: 'fixed', monthlyCost: 150 },
+    { id: 'p2', name: 'Painel Secundário', type: 'Xtream', login: 'user1', renewalDate: '2024-07-25', costType: 'perActive', costPerActive: 5, activeClients: 20 },
 ];
 
 export const plans: Plan[] = [
