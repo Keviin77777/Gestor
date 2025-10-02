@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo } from "react";
@@ -36,7 +37,6 @@ import { addDocumentNonBlocking, deleteDocumentNonBlocking, updateDocumentNonBlo
 export default function PlansAndPanelsPage() {
     const { firestore } = useFirebase();
     const { user } = useAuth();
-
     const resellerId = user?.uid;
 
     const panelsCollection = useMemoFirebase(() => {
@@ -125,6 +125,7 @@ export default function PlansAndPanelsPage() {
         updateDocumentNonBlocking(panelRef, updatedData);
         setIsEditDialogOpen(false);
         setSelectedPanel(null);
+        resetForm();
     };
 
     const handleRemovePanel = (panelId: string) => {
@@ -327,4 +328,6 @@ export default function PlansAndPanelsPage() {
         </>
     );
 }
+    
+
     
