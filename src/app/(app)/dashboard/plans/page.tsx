@@ -25,7 +25,6 @@ export default function PlansAndPanelsPage() {
                              <Card key={panel.id}>
                                 <CardHeader>
                                     <CardTitle>{panel.name}</CardTitle>
-                                    <CardDescription>Tipo: {panel.type}</CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                     <p className="text-lg font-semibold">Custo: R$ {panel.monthlyCost.toFixed(2)}/mês</p>
