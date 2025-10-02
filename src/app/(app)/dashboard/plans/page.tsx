@@ -85,17 +85,19 @@ export default function PlansAndPanelsPage() {
     const handleAddPanel = () => {
         if (!panelsCollection || !resellerId) return;
 
-        const newPanelData: Partial<Panel> = {
+        const newPanelData = {
             resellerId,
             name: panelName,
             renewalDate: renewalDate ? format(renewalDate, "yyyy-MM-dd") : '',
             costType: costType,
-            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : undefined,
-            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : undefined,
+            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : 0,
+            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : 0,
             type: panelType, 
-            login: panelLogin
+            login: panelLogin,
+            activeClients: 0,
         };
         addDocumentNonBlocking(panelsCollection, newPanelData);
+        resetForm();
         setIsAddDialogOpen(false);
     };
     
@@ -142,7 +144,7 @@ export default function PlansAndPanelsPage() {
             return `R$ ${panel.monthlyCost?.toFixed(2)}/mês`;
         }
         if (panel.costType === 'perActive' && panel.costPerActive) {
-             const activeClients = panel.activeClients || 0; // Replace with actual logic later
+             const activeClients = panel.activeClients || 0;
             const total = panel.costPerActive * activeClients;
             return `R$ ${total.toFixed(2)}/mês (R$ ${panel.costPerActive.toFixed(2)}/ativo)`;
         }
@@ -329,3 +331,5 @@ export default function PlansAndPanelsPage() {
         </>
     );
 }
+
+    
