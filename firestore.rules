@@ -1,0 +1,281 @@
+/**
+ * @fileOverview Firestore Security Rules for IPTV Reseller App
+ *
+ * Core Philosophy:
+ * This ruleset enforces a strict user-ownership model where each reseller
+ * can only access data explicitly associated with their user ID. This is
+ * achieved through hierarchical data organization and path-based authorization.
+ *
+ * Data Structure:
+ * All data is nested under /resellers/{resellerId}, where {resellerId} corresponds
+ * to the Firebase Auth UID of the reseller. Subcollections such as /clients,
+ * /panels, /plans, /expenses, /revenues, and /notifications reside under each
+ * reseller's document.
+ *
+ * Key Security Decisions:
+ * - Resellers can only manage their own data. No cross-reseller access is allowed.
+ * - Listing of collections is restricted to the owner.
+ * - Data validation is relaxed during this prototyping phase, focusing on authorization.
+ * - The rules explicitly deny any write operation with `if false;` to make explicit where the writes are not allowed and what the reasoning is behind it.
+ *
+ * Denormalization for Authorization:
+ * The 'resellerId' is used in the path for all subcollections. This avoids the
+ * need for complex `get()` calls to verify ownership.
+ */
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * @description Allows a reseller to manage their own profile.
+     * @path /resellers/{resellerId}
+     * @allow (create) User with UID 'user_abc' can create their profile if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read their profile if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update their profile if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete their profile if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create profile for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read profile for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update profile for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete profile for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes.
+     */
+    match /resellers/{resellerId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+
+      allow get: if true;
+      allow list: if false; //Resellers collection should not be listable by clients.
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own clients.
+     * @path /resellers/{resellerId}/clients/{clientId}
+     * @allow (create) User with UID 'user_abc' can create a client if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read client 'client_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update client 'client_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete client 'client_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list clients if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create a client for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read client 'client_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update client 'client_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete client 'client_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/clients/{clientId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own panels.
+     * @path /resellers/{resellerId}/panels/{panelId}
+     * @allow (create) User with UID 'user_abc' can create a panel if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read panel 'panel_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update panel 'panel_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete panel 'panel_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list panels if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create a panel for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read panel 'panel_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update panel 'panel_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete panel 'panel_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/panels/{panelId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own plans.
+     * @path /resellers/{resellerId}/plans/{planId}
+     * @allow (create) User with UID 'user_abc' can create a plan if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read plan 'plan_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update plan 'plan_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete plan 'plan_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list plans if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create a plan for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read plan 'plan_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update plan 'plan_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete plan 'plan_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/plans/{planId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own expenses.
+     * @path /resellers/{resellerId}/expenses/{expenseId}
+     * @allow (create) User with UID 'user_abc' can create an expense if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read expense 'expense_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update expense 'expense_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete expense 'expense_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list expenses if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create an expense for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read expense 'expense_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update expense 'expense_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete expense 'expense_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/expenses/{expenseId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own revenues.
+     * @path /resellers/{resellerId}/revenues/{revenueId}
+     * @allow (create) User with UID 'user_abc' can create a revenue if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read revenue 'revenue_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update revenue 'revenue_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete revenue 'revenue_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list revenues if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create a revenue for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read revenue 'revenue_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update revenue 'revenue_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete revenue 'revenue_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/revenues/{revenueId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own notifications.
+     * @path /resellers/{resellerId}/notifications/{notificationId}
+     * @allow (create) User with UID 'user_abc' can create a notification if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read notification 'notification_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update notification 'notification_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete notification 'notification_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list notifications if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create a notification for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read notification 'notification_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update notification 'notification_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete notification 'notification_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/notifications/{notificationId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+  }
+}

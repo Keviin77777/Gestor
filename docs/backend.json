@@ -1,0 +1,442 @@
+{
+  "entities": {
+    "Reseller": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Reseller",
+      "type": "object",
+      "description": "Represents a reseller (main user) of the IPTV service.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Reseller entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the reseller."
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of the reseller.",
+          "format": "email"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "Phone number of the reseller."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "email",
+        "phoneNumber"
+      ]
+    },
+    "Client": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Client",
+      "type": "object",
+      "description": "Represents a client of the IPTV reseller.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Client entity."
+        },
+        "resellerId": {
+          "type": "string",
+          "description": "Reference to Reseller. (Relationship: Reseller 1:N Client)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the client."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Start date of the client's subscription.",
+          "format": "date-time"
+        },
+        "planId": {
+          "type": "string",
+          "description": "Reference to Plan. (Relationship: Plan 1:N Client)"
+        },
+        "paymentValue": {
+          "type": "number",
+          "description": "The Amount the client paid."
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the client (active, inactive, in arrears)."
+        },
+        "renewalDate": {
+          "type": "string",
+          "description": "Renewal date of the client's subscription.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "resellerId",
+        "name",
+        "startDate",
+        "planId",
+        "paymentValue",
+        "status",
+        "renewalDate"
+      ]
+    },
+    "Panel": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Panel",
+      "type": "object",
+      "description": "Represents an IPTV panel.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Panel entity."
+        },
+        "resellerId": {
+          "type": "string",
+          "description": "Reference to Reseller. (Relationship: Reseller 1:N Panel)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the panel."
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of the panel (e.g., XUI, Xtream)."
+        },
+        "login": {
+          "type": "string",
+          "description": "Login credentials for the panel."
+        },
+        "password": {
+          "type": "string",
+          "description": "Password for the panel. Should be stored securely."
+        },
+        "monthlyCost": {
+          "type": "number",
+          "description": "Monthly cost of the panel."
+        }
+      },
+      "required": [
+        "id",
+        "resellerId",
+        "name",
+        "type",
+        "login",
+        "password",
+        "monthlyCost"
+      ]
+    },
+    "Plan": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Plan",
+      "type": "object",
+      "description": "Represents a subscription plan.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Plan entity."
+        },
+        "resellerId": {
+          "type": "string",
+          "description": "Reference to Reseller. (Relationship: Reseller 1:N Plan)"
+        },
+        "panelId": {
+          "type": "string",
+          "description": "Reference to Panel. (Relationship: Panel 1:N Plan)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the plan."
+        },
+        "saleValue": {
+          "type": "number",
+          "description": "Sale value of the plan."
+        },
+        "duration": {
+          "type": "string",
+          "description": "Duration of the plan (monthly, quarterly, annual)."
+        }
+      },
+      "required": [
+        "id",
+        "resellerId",
+        "panelId",
+        "name",
+        "saleValue",
+        "duration"
+      ]
+    },
+    "Expense": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Expense",
+      "type": "object",
+      "description": "Represents an expense.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Expense entity."
+        },
+        "resellerId": {
+          "type": "string",
+          "description": "Reference to Reseller. (Relationship: Reseller 1:N Expense)"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of the expense.",
+          "format": "date-time"
+        },
+        "value": {
+          "type": "number",
+          "description": "Value of the expense."
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of expense (fixed or variable)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the expense."
+        }
+      },
+      "required": [
+        "id",
+        "resellerId",
+        "date",
+        "value",
+        "type",
+        "description"
+      ]
+    },
+    "Revenue": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Revenue",
+      "type": "object",
+      "description": "Represents a revenue record.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Revenue entity."
+        },
+        "resellerId": {
+          "type": "string",
+          "description": "Reference to Reseller. (Relationship: Reseller 1:N Revenue)"
+        },
+        "clientId": {
+          "type": "string",
+          "description": "Reference to Client. (Relationship: Client 1:N Revenue)"
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of the revenue.",
+          "format": "date-time"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Amount of the revenue."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the revenue."
+        }
+      },
+      "required": [
+        "id",
+        "resellerId",
+        "clientId",
+        "date",
+        "amount",
+        "description"
+      ]
+    },
+    "Notification": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Notification",
+      "type": "object",
+      "description": "Represents a notification.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Notification entity."
+        },
+        "resellerId": {
+          "type": "string",
+          "description": "Reference to Reseller. (Relationship: Reseller 1:N Notification)"
+        },
+        "message": {
+          "type": "string",
+          "description": "The content of the notification."
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp of when the notification was created.",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "description": "Type of the notification (e.g., payment due, panel expiring)."
+        },
+        "isRead": {
+          "type": "boolean",
+          "description": "Indicates if the notification has been read."
+        }
+      },
+      "required": [
+        "id",
+        "resellerId",
+        "message",
+        "timestamp",
+        "type",
+        "isRead"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/resellers/{resellerId}",
+        "definition": {
+          "entityName": "Reseller",
+          "schema": {
+            "$ref": "#/backend/entities/Reseller"
+          },
+          "description": "Stores reseller profiles. The 'resellerId' is the Firebase Auth UID.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/resellers/{resellerId}/clients/{clientId}",
+        "definition": {
+          "entityName": "Client",
+          "schema": {
+            "$ref": "#/backend/entities/Client"
+          },
+          "description": "Stores clients owned by a specific reseller.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            },
+            {
+              "name": "clientId",
+              "description": "Unique ID of the client."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/resellers/{resellerId}/panels/{panelId}",
+        "definition": {
+          "entityName": "Panel",
+          "schema": {
+            "$ref": "#/backend/entities/Panel"
+          },
+          "description": "Stores panels owned by a specific reseller.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            },
+            {
+              "name": "panelId",
+              "description": "Unique ID of the panel."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/resellers/{resellerId}/plans/{planId}",
+        "definition": {
+          "entityName": "Plan",
+          "schema": {
+            "$ref": "#/backend/entities/Plan"
+          },
+          "description": "Stores plans owned by a specific reseller.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            },
+            {
+              "name": "planId",
+              "description": "Unique ID of the plan."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/resellers/{resellerId}/expenses/{expenseId}",
+        "definition": {
+          "entityName": "Expense",
+          "schema": {
+            "$ref": "#/backend/entities/Expense"
+          },
+          "description": "Stores expenses owned by a specific reseller.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            },
+            {
+              "name": "expenseId",
+              "description": "Unique ID of the expense."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/resellers/{resellerId}/revenues/{revenueId}",
+        "definition": {
+          "entityName": "Revenue",
+          "schema": {
+            "$ref": "#/backend/entities/Revenue"
+          },
+          "description": "Stores revenues owned by a specific reseller.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            },
+            {
+              "name": "revenueId",
+              "description": "Unique ID of the revenue."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/resellers/{resellerId}/notifications/{notificationId}",
+        "definition": {
+          "entityName": "Notification",
+          "schema": {
+            "$ref": "#/backend/entities/Notification"
+          },
+          "description": "Stores notifications owned by a specific reseller.",
+          "params": [
+            {
+              "name": "resellerId",
+              "description": "The Firebase Auth UID of the reseller."
+            },
+            {
+              "name": "notificationId",
+              "description": "Unique ID of the notification."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "This Firestore structure prioritizes authorization independence and data integrity as requested. It uses path-based ownership for reseller-owned data, ensuring clear and secure access rules.\n\n*   Resellers are stored in the `/resellers` collection.\n*   Each reseller 'owns' their clients, panels, plans, expenses, revenues, and notifications using hierarchical paths like `/resellers/{resellerId}/clients/{clientId}`. This approach simplifies security rules since access control is directly tied to the document path. The rule `request.auth.uid == resellerId` is secure and efficient.\n\nAuthorization Independence (CRITICAL): This design avoids using `get()` calls in security rules by using path-based ownership. Each subcollection is owned by a specific reseller. This eliminates hierarchical authorization dependencies.\n\nQAPs (Rules are not Filters): This design supports secure `list` operations because each reseller's data is stored under their own document. Rules can efficiently filter data based on the `resellerId` path segment, preventing unauthorized access to other resellers' data.\n\nInvariants: Path-based ownership enforces the invariant that only the owning reseller can create, read, update, or delete documents within their hierarchical path. Timestamp and denormalized data integrity can be enforced through rules as well."
+  }
+}
