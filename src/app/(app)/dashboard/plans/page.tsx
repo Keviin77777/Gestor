@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useMemo } from "react";
@@ -62,7 +61,6 @@ export default function PlansAndPanelsPage() {
     const [costType, setCostType] = useState<'fixed' | 'perActive'>('fixed');
     const [monthlyCost, setMonthlyCost] = useState("");
     const [costPerActive, setCostPerActive] = useState("");
-    const [panelType, setPanelType] = useState<'XUI' | 'Xtream' | 'Other'>('XUI');
     const [panelLogin, setPanelLogin] = useState("");
 
 
@@ -72,7 +70,6 @@ export default function PlansAndPanelsPage() {
         setCostType("fixed");
         setMonthlyCost("");
         setCostPerActive("");
-        setPanelType("XUI");
         setPanelLogin("");
         setSelectedPanel(null);
     };
@@ -92,7 +89,6 @@ export default function PlansAndPanelsPage() {
             costType: costType,
             monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : 0,
             costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : 0,
-            type: panelType, 
             login: panelLogin,
             activeClients: 0,
         };
@@ -108,7 +104,6 @@ export default function PlansAndPanelsPage() {
         setCostType(panel.costType);
         setMonthlyCost(panel.monthlyCost?.toString() || "");
         setCostPerActive(panel.costPerActive?.toString() || "");
-        setPanelType(panel.type);
         setPanelLogin(panel.login);
         setIsEditDialogOpen(true);
     };
@@ -124,7 +119,6 @@ export default function PlansAndPanelsPage() {
             costType: costType,
             monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : undefined,
             costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : undefined,
-            type: panelType,
             login: panelLogin,
           };
 
@@ -158,7 +152,7 @@ export default function PlansAndPanelsPage() {
                 <Input id="panel-name" value={panelName} onChange={(e) => setPanelName(e.target.value)} placeholder="Ex: Painel Principal" className="col-span-3" />
             </div>
              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="panel-type" className="text-right">Login</Label>
+                <Label htmlFor="panel-login" className="text-right">Login</Label>
                 <Input id="panel-login" value={panelLogin} onChange={(e) => setPanelLogin(e.target.value)} placeholder="Ex: admin" className="col-span-3" />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
@@ -308,6 +302,7 @@ export default function PlansAndPanelsPage() {
                     </DialogHeader>
                     {FormFields}
                     <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancelar</Button>
                         <Button onClick={handleAddPanel}>Salvar</Button>
                     </DialogFooter>
                 </DialogContent>
@@ -324,6 +319,7 @@ export default function PlansAndPanelsPage() {
                     </DialogHeader>
                     {FormFields}
                     <DialogFooter>
+                         <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancelar</Button>
                         <Button onClick={handleEditPanel}>Salvar Alterações</Button>
                     </DialogFooter>
                 </DialogContent>
@@ -331,5 +327,4 @@ export default function PlansAndPanelsPage() {
         </>
     );
 }
-
     

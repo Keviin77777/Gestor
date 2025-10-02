@@ -13,7 +13,6 @@ export type Panel = {
   id: string;
   resellerId: string;
   name: string;
-  type: 'XUI' | 'Xtream' | 'Other';
   login: string;
   renewalDate: string; // ISO 8601 format
   costType: 'fixed' | 'perActive';
@@ -44,3 +43,5 @@ export type MonthlyProfit = {
   month: string;
   profit: number;
 };
+
+    
