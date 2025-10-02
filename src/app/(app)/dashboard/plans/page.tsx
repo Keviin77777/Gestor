@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useMemo } from "react";
@@ -318,7 +319,7 @@ export default function PlansAndPanelsPage() {
                     <DialogDescription>
                         Atualize as informações do painel.
                     </DialogDescription>
-                    </Header>
+                    </DialogHeader>
                     {FormFields}
                     <DialogFooter>
                         <Button onClick={handleEditPanel}>Salvar Alterações</Button>
