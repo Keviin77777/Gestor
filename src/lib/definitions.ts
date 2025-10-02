@@ -1,39 +1,43 @@
 export type Client = {
   id: string;
+  resellerId: string;
   name: string;
-  startDate: string;
-  plan: string;
-  value: number;
+  startDate: string; // ISO 8601 format
+  planId: string;
+  paymentValue: number;
   status: 'active' | 'inactive' | 'late';
-  renewalDate: string;
+  renewalDate: string; // ISO 8601 format
 };
 
 export type Panel = {
   id: string;
+  resellerId: string;
   name: string;
   type: 'XUI' | 'Xtream' | 'Other';
   login: string;
-  renewalDate: string;
+  renewalDate: string; // ISO 8601 format
   costType: 'fixed' | 'perActive';
   monthlyCost?: number;
   costPerActive?: number;
-  activeClients?: number; // Only relevant for 'perActive'
+  activeClients?: number; // This will likely be a derived/calculated value
 };
 
 export type Plan = {
-  id:string;
-  name: string;
-  value: number;
-  duration: 'monthly' | 'quarterly' | 'yearly';
+  id: string;
+  resellerId: string;
   panelId: string;
+  name: string;
+  saleValue: number;
+  duration: 'monthly' | 'quarterly' | 'yearly';
 };
 
 export type Expense = {
   id: string;
-  date: string;
-  description: string;
-  type: 'fixed' | 'variable';
+  resellerId: string;
+  date: string; // ISO 8601 format
   value: number;
+  type: 'fixed' | 'variable';
+  description: string;
 };
 
 export type MonthlyProfit = {

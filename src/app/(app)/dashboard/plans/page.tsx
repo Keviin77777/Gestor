@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PlusCircle, MoreVertical, Edit, Trash2, CalendarIcon } from "lucide-react";
-import { panels, plans, clients } from "@/lib/data";
-import type { Panel } from "@/lib/definitions";
+import type { Panel, Plan } from "@/lib/definitions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,19 +28,42 @@ import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { useAuth, useFirebase, useMemoFirebase } from "@/firebase";
+import { collection, doc } from "firebase/firestore";
+import { useCollection } from "@/firebase/firestore/use-collection";
+import { addDocumentNonBlocking, deleteDocumentNonBlocking, updateDocumentNonBlocking } from "@/firebase/non-blocking-updates";
 
 export default function PlansAndPanelsPage() {
-    const [panelList, setPanelList] = useState<Panel[]>(panels.map(p => ({...p, activeClients: p.costType === 'perActive' ? clients.length : undefined })));
+    const { firestore } = useFirebase();
+    const { user } = useAuth();
+
+    const resellerId = user?.uid;
+
+    const panelsCollection = useMemoFirebase(() => {
+        if (!resellerId) return null;
+        return collection(firestore, 'resellers', resellerId, 'panels');
+    }, [firestore, resellerId]);
+
+    const plansCollection = useMemoFirebase(() => {
+        if (!resellerId) return null;
+        return collection(firestore, 'resellers', resellerId, 'plans');
+    }, [firestore, resellerId]);
+
+    const { data: panelList, isLoading: panelsLoading } = useCollection<Panel>(panelsCollection);
+    const { data: plans, isLoading: plansLoading } = useCollection<Plan>(plansCollection);
+
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [selectedPanel, setSelectedPanel] = useState<Panel | null>(null);
 
-    // Form state
     const [panelName, setPanelName] = useState("");
     const [renewalDate, setRenewalDate] = useState<Date | undefined>();
     const [costType, setCostType] = useState<'fixed' | 'perActive'>('fixed');
     const [monthlyCost, setMonthlyCost] = useState("");
     const [costPerActive, setCostPerActive] = useState("");
+    const [panelType, setPanelType] = useState<'XUI' | 'Xtream' | 'Other'>('XUI');
+    const [panelLogin, setPanelLogin] = useState("");
+
 
     const resetForm = () => {
         setPanelName("");
@@ -49,6 +71,9 @@ export default function PlansAndPanelsPage() {
         setCostType("fixed");
         setMonthlyCost("");
         setCostPerActive("");
+        setPanelType("XUI");
+        setPanelLogin("");
+        setSelectedPanel(null);
     };
     
     const handleOpenAddDialog = () => {
@@ -57,19 +82,19 @@ export default function PlansAndPanelsPage() {
     }
 
     const handleAddPanel = () => {
-        const newPanel: Panel = {
-            id: `p${panelList.length + 1}`,
+        if (!panelsCollection || !resellerId) return;
+
+        const newPanelData = {
+            resellerId,
             name: panelName,
             renewalDate: renewalDate ? format(renewalDate, "yyyy-MM-dd") : '',
             costType: costType,
-            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) : undefined,
-            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) : undefined,
-            activeClients: costType === 'perActive' ? clients.length : undefined,
-            // Setting default values for fields not in the form
-            type: 'XUI', 
-            login: 'admin'
+            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : null,
+            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : null,
+            type: panelType, 
+            login: panelLogin
         };
-        setPanelList([...panelList, newPanel]);
+        addDocumentNonBlocking(panelsCollection, newPanelData);
         setIsAddDialogOpen(false);
     };
     
@@ -80,40 +105,45 @@ export default function PlansAndPanelsPage() {
         setCostType(panel.costType);
         setMonthlyCost(panel.monthlyCost?.toString() || "");
         setCostPerActive(panel.costPerActive?.toString() || "");
+        setPanelType(panel.type);
+        setPanelLogin(panel.login);
         setIsEditDialogOpen(true);
     };
 
     const handleEditPanel = () => {
-        if (!selectedPanel) return;
+        if (!selectedPanel || !resellerId || !firestore) return;
 
-        setPanelList(panelList.map(p =>
-            p.id === selectedPanel.id
-                ? { 
-                    ...p, 
-                    name: panelName,
-                    renewalDate: renewalDate ? format(renewalDate, "yyyy-MM-dd") : p.renewalDate,
-                    costType: costType,
-                    monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) : undefined,
-                    costPerActive: costType === 'perActive' ? parseFloat(costPerActive) : undefined,
-                    activeClients: costType === 'perActive' ? clients.length : p.activeClients,
-                  }
-                : p
-        ));
+        const panelRef = doc(firestore, 'resellers', resellerId, 'panels', selectedPanel.id);
+        
+        const updatedData = { 
+            name: panelName,
+            renewalDate: renewalDate ? format(renewalDate, "yyyy-MM-dd") : selectedPanel.renewalDate,
+            costType: costType,
+            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : null,
+            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : null,
+            type: panelType,
+            login: panelLogin,
+          };
+
+        updateDocumentNonBlocking(panelRef, updatedData);
         setIsEditDialogOpen(false);
         setSelectedPanel(null);
     };
 
     const handleRemovePanel = (panelId: string) => {
-        setPanelList(panelList.filter(p => p.id !== panelId));
+        if (!resellerId || !firestore) return;
+        const panelRef = doc(firestore, 'resellers', resellerId, 'panels', panelId);
+        deleteDocumentNonBlocking(panelRef);
     };
 
     const renderCost = (panel: Panel) => {
         if (panel.costType === 'fixed') {
             return `R$ ${panel.monthlyCost?.toFixed(2)}/mês`;
         }
-        if (panel.costType === 'perActive') {
-            const total = (panel.costPerActive || 0) * (panel.activeClients || 0);
-            return `R$ ${total.toFixed(2)}/mês (R$ ${panel.costPerActive?.toFixed(2)}/ativo)`;
+        if (panel.costType === 'perActive' && panel.costPerActive) {
+             const activeClients = panel.activeClients || 0; // Replace with actual logic later
+            const total = panel.costPerActive * activeClients;
+            return `R$ ${total.toFixed(2)}/mês (R$ ${panel.costPerActive.toFixed(2)}/ativo)`;
         }
         return 'N/A';
     }
@@ -123,6 +153,14 @@ export default function PlansAndPanelsPage() {
             <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="panel-name" className="text-right">Nome</Label>
                 <Input id="panel-name" value={panelName} onChange={(e) => setPanelName(e.target.value)} placeholder="Ex: Painel Principal" className="col-span-3" />
+            </div>
+             <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="panel-type" className="text-right">Tipo</Label>
+                <Input id="panel-type" value={panelType} onChange={(e) => setPanelType(e.target.value as any)} placeholder="Ex: XUI" className="col-span-3" />
+            </div>
+             <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="panel-login" className="text-right">Login</Label>
+                <Input id="panel-login" value={panelLogin} onChange={(e) => setPanelLogin(e.target.value)} placeholder="Ex: admin" className="col-span-3" />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="renewal-date" className="text-right">Vencimento</Label>
@@ -198,7 +236,8 @@ export default function PlansAndPanelsPage() {
                             <CardDescription>Gerencie seus painéis de IPTV, que funcionam como suas franquias.</CardDescription>
                         </CardHeader>
                         <CardContent className="grid gap-4 md:grid-cols-2">
-                            {panelList.map(panel => (
+                            {panelsLoading && <p>Carregando painéis...</p>}
+                            {panelList?.map(panel => (
                                 <Card key={panel.id}>
                                     <CardHeader className="flex flex-row items-start justify-between pb-2">
                                         <div>
@@ -225,7 +264,7 @@ export default function PlansAndPanelsPage() {
                                     </CardHeader>
                                     <CardContent>
                                         <p className="text-lg font-semibold">{renderCost(panel)}</p>
-                                        {panel.costType === 'perActive' && <p className="text-sm text-muted-foreground">{panel.activeClients} clientes ativos</p>}
+                                        {panel.costType === 'perActive' && <p className="text-sm text-muted-foreground">{panel.activeClients || 0} clientes ativos</p>}
                                     </CardContent>
                                 </Card>
                             ))}
@@ -242,14 +281,15 @@ export default function PlansAndPanelsPage() {
                             <CardDescription>Gerencie os planos que você oferece aos clientes.</CardDescription>
                         </CardHeader>
                         <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                            {plans.map(plan => (
+                             {plansLoading && <p>Carregando planos...</p>}
+                            {plans?.map(plan => (
                                 <Card key={plan.id}>
                                     <CardHeader>
                                         <CardTitle>{plan.name}</CardTitle>
                                         <CardDescription>Duração: {plan.duration === 'monthly' ? 'Mensal' : plan.duration === 'quarterly' ? 'Trimestral' : 'Anual'}</CardDescription>
                                     </CardHeader>
                                     <CardContent>
-                                        <p className="text-lg font-semibold">Valor: R$ {plan.value.toFixed(2)}</p>
+                                        <p className="text-lg font-semibold">Valor: R$ {plan.saleValue.toFixed(2)}</p>
                                     </CardContent>
                                 </Card>
                             ))}
@@ -282,7 +322,7 @@ export default function PlansAndPanelsPage() {
                     <DialogDescription>
                         Atualize as informações do painel.
                     </DialogDescription>
-                    </DialogHeader>
+                    </Header>
                     {FormFields}
                     <DialogFooter>
                         <Button onClick={handleEditPanel}>Salvar Alterações</Button>

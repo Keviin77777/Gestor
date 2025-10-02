@@ -38,6 +38,9 @@ import { MoreHorizontal, PlusCircle } from "lucide-react";
 import type { Client } from "@/lib/definitions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth, useFirebase, useMemoFirebase } from "@/firebase";
+import { useCollection } from "@/firebase/firestore/use-collection";
+import { collection } from "firebase/firestore";
 
 const statusMap: { [key in Client['status']]: { text: string; className: string } } = {
   active: { text: "Ativo", className: "bg-green-100 text-green-800 border-green-200 hover:bg-green-100" },
@@ -45,8 +48,19 @@ const statusMap: { [key in Client['status']]: { text: string; className: string 
   late: { text: "Atrasado", className: "bg-red-100 text-red-800 border-red-200 hover:bg-red-100" },
 };
 
-export function ClientTable({ data }: { data: Client[] }) {
+export function ClientTable() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
+  const { firestore } = useFirebase();
+  const { user } = useAuth();
+  const resellerId = user?.uid;
+
+  const clientsCollection = useMemoFirebase(() => {
+    if (!resellerId) return null;
+    return collection(firestore, 'resellers', resellerId, 'clients');
+  }, [firestore, resellerId]);
+
+  const { data, isLoading } = useCollection<Client>(clientsCollection);
+
 
   return (
     <>
@@ -83,18 +97,19 @@ export function ClientTable({ data }: { data: Client[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((client) => (
+            {isLoading && <TableRow><TableCell colSpan={6}>Carregando clientes...</TableCell></TableRow>}
+            {data?.map((client) => (
               <TableRow key={client.id}>
                 <TableCell className="font-medium">{client.name}</TableCell>
-                <TableCell>{client.plan}</TableCell>
+                <TableCell>{client.planId}</TableCell>
                 <TableCell className="text-center">
-                  <Badge variant="outline" className={statusMap[client.status].className}>
-                    {statusMap[client.status].text}
+                  <Badge variant="outline" className={statusMap[client.status]?.className}>
+                    {statusMap[client.status]?.text}
                   </Badge>
                 </TableCell>
                 <TableCell>{client.renewalDate}</TableCell>
                 <TableCell className="text-right">
-                  R$ {client.value.toFixed(2)}
+                  R$ {client.paymentValue.toFixed(2)}
                 </TableCell>
                 <TableCell className="text-right">
                   <DropdownMenu>

@@ -1,11 +1,27 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { expenses } from "@/lib/data";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PlusCircle } from "lucide-react";
+import { useAuth, useFirebase, useMemoFirebase } from "@/firebase";
+import { collection } from "firebase/firestore";
+import { useCollection } from "@/firebase/firestore/use-collection";
+import type { Expense } from "@/lib/definitions";
 
 export default function ExpensesPage() {
+    const { firestore } = useFirebase();
+    const { user } = useAuth();
+    const resellerId = user?.uid;
+
+    const expensesCollection = useMemoFirebase(() => {
+        if (!resellerId) return null;
+        return collection(firestore, 'resellers', resellerId, 'expenses');
+    }, [firestore, resellerId]);
+
+    const { data: expenses, isLoading } = useCollection<Expense>(expensesCollection);
+
     return (
         <Card>
             <CardHeader>
@@ -28,7 +44,8 @@ export default function ExpensesPage() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {expenses.map((expense) => (
+                        {isLoading && <TableRow><TableCell colSpan={4}>Carregando despesas...</TableCell></TableRow>}
+                        {expenses?.map((expense) => (
                             <TableRow key={expense.id}>
                                 <TableCell>{expense.date}</TableCell>
                                 <TableCell className="font-medium">{expense.description}</TableCell>
