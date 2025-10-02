@@ -84,13 +84,13 @@ export default function PlansAndPanelsPage() {
     const handleAddPanel = () => {
         if (!panelsCollection || !resellerId) return;
 
-        const newPanelData = {
+        const newPanelData: Partial<Panel> = {
             resellerId,
             name: panelName,
             renewalDate: renewalDate ? format(renewalDate, "yyyy-MM-dd") : '',
             costType: costType,
-            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : null,
-            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : null,
+            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : undefined,
+            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : undefined,
             type: panelType, 
             login: panelLogin
         };
@@ -101,7 +101,7 @@ export default function PlansAndPanelsPage() {
     const openEditDialog = (panel: Panel) => {
         setSelectedPanel(panel);
         setPanelName(panel.name);
-        setRenewalDate(new Date(panel.renewalDate));
+        setRenewalDate(panel.renewalDate ? new Date(panel.renewalDate) : undefined);
         setCostType(panel.costType);
         setMonthlyCost(panel.monthlyCost?.toString() || "");
         setCostPerActive(panel.costPerActive?.toString() || "");
@@ -115,12 +115,12 @@ export default function PlansAndPanelsPage() {
 
         const panelRef = doc(firestore, 'resellers', resellerId, 'panels', selectedPanel.id);
         
-        const updatedData = { 
+        const updatedData: Partial<Panel> = { 
             name: panelName,
             renewalDate: renewalDate ? format(renewalDate, "yyyy-MM-dd") : selectedPanel.renewalDate,
             costType: costType,
-            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : null,
-            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : null,
+            monthlyCost: costType === 'fixed' ? parseFloat(monthlyCost) || 0 : undefined,
+            costPerActive: costType === 'perActive' ? parseFloat(costPerActive) || 0 : undefined,
             type: panelType,
             login: panelLogin,
           };
@@ -155,11 +155,7 @@ export default function PlansAndPanelsPage() {
                 <Input id="panel-name" value={panelName} onChange={(e) => setPanelName(e.target.value)} placeholder="Ex: Painel Principal" className="col-span-3" />
             </div>
              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="panel-type" className="text-right">Tipo</Label>
-                <Input id="panel-type" value={panelType} onChange={(e) => setPanelType(e.target.value as any)} placeholder="Ex: XUI" className="col-span-3" />
-            </div>
-             <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="panel-login" className="text-right">Login</Label>
+                <Label htmlFor="panel-type" className="text-right">Login</Label>
                 <Input id="panel-login" value={panelLogin} onChange={(e) => setPanelLogin(e.target.value)} placeholder="Ex: admin" className="col-span-3" />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
@@ -242,7 +238,7 @@ export default function PlansAndPanelsPage() {
                                     <CardHeader className="flex flex-row items-start justify-between pb-2">
                                         <div>
                                             <CardTitle>{panel.name}</CardTitle>
-                                            <CardDescription>Vence em: {format(new Date(panel.renewalDate), "dd/MM/yyyy")}</CardDescription>
+                                            <CardDescription>Vence em: {panel.renewalDate ? format(new Date(panel.renewalDate), "dd/MM/yyyy") : 'N/A'}</CardDescription>
                                         </div>
                                         <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
