@@ -8,7 +8,7 @@
  * - SmartRenewalNotificationsOutput - The return type for the smartRenewalNotifications function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai, hasGemini} from '@/ai/genkit';
 import {z} from 'genkit';
 
 const SmartRenewalNotificationsInputSchema = z.object({
@@ -38,6 +38,21 @@ const SmartRenewalNotificationsOutputSchema = z.object({
 export type SmartRenewalNotificationsOutput = z.infer<typeof SmartRenewalNotificationsOutputSchema>;
 
 export async function smartRenewalNotifications(input: SmartRenewalNotificationsInput): Promise<SmartRenewalNotificationsOutput> {
+  if (!hasGemini) {
+    // Local deterministic fallback without AI when API key is missing
+    const notifications: string[] = [];
+    for (const c of input.clientsExpiringSoon) {
+      notifications.push(
+        `Alerta: A assinatura do cliente ${c.clientName} para o plano ${c.planName} expira em ${c.renewalDate}. Entre em contato para renovar.`
+      );
+    }
+    for (const p of input.panelsNeedingRenewal) {
+      notifications.push(
+        `Aviso: A renovação do painel ${p.panelName} vence em ${p.renewalDate}. Garanta o pagamento.`
+      );
+    }
+    return { notifications };
+  }
   return smartRenewalNotificationsFlow(input);
 }
 

@@ -1,14 +1,13 @@
 "use client";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useAuth, useFirebase, useMemoFirebase } from "@/firebase";
+import { useFirebase, useMemoFirebase } from "@/firebase";
 import { useCollection } from "@/firebase/firestore/use-collection";
-import { Client } from "@/lib/definitions";
+import { Client, Plan } from "@/lib/definitions";
 import { collection, limit, orderBy, query } from "firebase/firestore";
 
 export function RecentClients() {
-  const { firestore } = useFirebase();
-  const { user } = useAuth();
+  const { firestore, user } = useFirebase();
   const resellerId = user?.uid;
 
   const recentClientsQuery = useMemoFirebase(() => {
@@ -17,7 +16,13 @@ export function RecentClients() {
     return query(clientsRef, orderBy('startDate', 'desc'), limit(5));
   }, [firestore, resellerId]);
 
+  const plansCollection = useMemoFirebase(() => {
+    if (!resellerId) return null;
+    return collection(firestore, 'resellers', resellerId, 'plans');
+  }, [firestore, resellerId]);
+
   const { data: recentClients, isLoading } = useCollection<Client>(recentClientsQuery);
+  const { data: plans } = useCollection<Plan>(plansCollection);
 
   if (isLoading) {
     return <div>Carregando...</div>;
@@ -28,12 +33,13 @@ export function RecentClients() {
       {recentClients?.map((client) => (
         <div key={client.id} className="flex items-center">
           <Avatar className="h-9 w-9">
-            <AvatarImage src={`https://picsum.photos/seed/${client.id}/40/40`} data-ai-hint="person avatar" alt="Avatar" />
-            <AvatarFallback>{client.name.substring(0, 2).toUpperCase()}}</AvatarFallback>
+            <AvatarFallback>{client.name.charAt(0).toUpperCase()}</AvatarFallback>
           </Avatar>
           <div className="ml-4 space-y-1">
             <p className="text-sm font-medium leading-none">{client.name}</p>
-            <p className="text-sm text-muted-foreground">{client.planId}</p>
+            <p className="text-sm text-muted-foreground">
+              {plans?.find(p => p.id === client.planId)?.name || client.planId}
+            </p>
           </div>
           <div className="ml-auto font-medium">+R${client.paymentValue.toFixed(2)}</div>
         </div>

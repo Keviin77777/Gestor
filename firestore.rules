@@ -277,5 +277,77 @@ service cloud.firestore {
       allow update: if isExistingOwner(resellerId);
       allow delete: if isExistingOwner(resellerId);
     }
+
+    /**
+     * @description Allows a reseller to manage their own invoices.
+     * @path /resellers/{resellerId}/invoices/{invoiceId}
+     * @allow (create) User with UID 'user_abc' can create an invoice if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read invoice 'invoice_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update invoice 'invoice_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete invoice 'invoice_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list invoices if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create an invoice for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read invoice 'invoice_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update invoice 'invoice_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete invoice 'invoice_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/invoices/{invoiceId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
+
+    /**
+     * @description Allows a reseller to manage their own apps.
+     * @path /resellers/{resellerId}/apps/{appId}
+     * @allow (create) User with UID 'user_abc' can create an app if resellerId == user_abc.
+     * @allow (get) User with UID 'user_abc' can read app 'app_123' if resellerId == user_abc.
+     * @allow (update) User with UID 'user_abc' can update app 'app_123' if resellerId == user_abc.
+     * @allow (delete) User with UID 'user_abc' can delete app 'app_123' if resellerId == user_abc.
+     * @allow (list) User with UID 'user_abc' can list apps if resellerId == user_abc.
+     * @deny (create) User with UID 'user_xyz' cannot create an app for resellerId 'user_abc'.
+     * @deny (get) User with UID 'user_xyz' cannot read app 'app_123' for resellerId 'user_abc'.
+     * @deny (update) User with UID 'user_xyz' cannot update app 'app_123' for resellerId 'user_abc'.
+     * @deny (delete) User with UID 'user_xyz' cannot delete app 'app_123' for resellerId 'user_abc'.
+     * @principle Enforces document ownership for writes and restricts access to a user's own data tree.
+     */
+    match /resellers/{resellerId}/apps/{appId} {
+      // Verified Identity
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      // Path-based authorization
+      function isOwner(resellerId) {
+        return isSignedIn() && request.auth.uid == resellerId;
+      }
+
+      // Existing Owner check for update and delete.  Improves readability and prevents accidental omissions.
+      function isExistingOwner(resellerId) {
+        return (isOwner(resellerId) && resource != null);
+      }
+      allow get: if isOwner(resellerId);
+      allow list: if isOwner(resellerId);
+      allow create: if isOwner(resellerId);
+      allow update: if isExistingOwner(resellerId);
+      allow delete: if isExistingOwner(resellerId);
+    }
   }
 }
