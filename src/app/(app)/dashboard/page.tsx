@@ -12,6 +12,10 @@ import { DollarSign, Users, CreditCard, Activity, TrendingUp, TrendingDown, Arro
 import { OverviewChart } from "@/components/dashboard/overview-chart";
 import { SmartNotifications } from "@/components/dashboard/smart-notifications";
 import { RecentClients } from "@/components/dashboard/recent-clients";
+import { ExpiringClients } from "@/components/dashboard/expiring-clients";
+import { DailyClientsChart } from "@/components/dashboard/daily-clients-chart";
+import { DailyPaymentsChart } from "@/components/dashboard/daily-payments-chart";
+import { TopServersChart } from "@/components/dashboard/top-servers-chart";
 import { useFirebase, useMemoFirebase } from "@/firebase";
 import { useCollection } from "@/firebase/firestore/use-collection";
 import { collection } from "firebase/firestore";
@@ -387,33 +391,47 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* Daily Charts */}
+      <div className="grid gap-6 md:grid-cols-2 animate-slide-up">
+        <DailyClientsChart clients={clients || undefined} />
+        <DailyPaymentsChart invoices={invoices || undefined} />
+      </div>
+
+      {/* Top Servers */}
+      <div className="animate-slide-up">
+        <TopServersChart clients={clients || undefined} panels={panels || undefined} plans={plans || undefined} />
+      </div>
+
       {/* Charts and Notifications */}
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3 animate-scale-in">
-        <Card className="lg:col-span-2 border-0 shadow-xl bg-gradient-to-br from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50 hover:shadow-2xl transition-all duration-300">
-          <CardHeader className="pb-6 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="space-y-2">
-                <CardTitle className="text-2xl font-headline font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">
-                  Evolução Financeira
-                </CardTitle>
-                <p className="text-slate-600 dark:text-slate-400">
-                  Acompanhe o crescimento dos últimos 12 meses
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-full">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                  <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                    Ao vivo
-                  </span>
+        <div className="lg:col-span-2 space-y-8">
+          <Card className="border-0 shadow-xl bg-gradient-to-br from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50 hover:shadow-2xl transition-all duration-300">
+            <CardHeader className="pb-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="space-y-2">
+                  <CardTitle className="text-2xl font-headline font-bold bg-gradient-to-r from-slate-900 to-slate-600 dark:from-slate-100 dark:to-slate-400 bg-clip-text text-transparent">
+                    Evolução Financeira
+                  </CardTitle>
+                  <p className="text-slate-600 dark:text-slate-400">
+                    Acompanhe o crescimento dos últimos 12 meses
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-full">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                      Ao vivo
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </CardHeader>
-          <CardContent className="pl-2">
-            <OverviewChart />
-          </CardContent>
-        </Card>
+            </CardHeader>
+            <CardContent className="pl-2">
+              <OverviewChart />
+            </CardContent>
+          </Card>
+          <ExpiringClients clients={clients || undefined} plans={plans || undefined} />
+        </div>
         <div className="space-y-6">
           <SmartNotifications />
         </div>

@@ -1625,7 +1625,7 @@ export function ClientTable() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Painel</Label>
-                  <Select value={selectedPanelId} onValueChange={setSelectedPanelId}>
+                  <Select value={selectedPanelId} onValueChange={(value) => { setSelectedPanelId(value); setSelectedPlanId(""); }}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
                       <SelectValue placeholder="Selecione um painel" />
                     </SelectTrigger>
@@ -1639,12 +1639,12 @@ export function ClientTable() {
 
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Plano</Label>
-                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
+                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={!selectedPanelId}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
-                      <SelectValue placeholder="Selecione um plano" />
+                      <SelectValue placeholder={selectedPanelId ? "Selecione um plano" : "Selecione um painel primeiro"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {(plans || []).map(pl => (
+                      {(plans || []).filter(pl => pl.panelId === selectedPanelId).map(pl => (
                         <SelectItem key={pl.id} value={pl.id}>
                           {pl.name} - R$ {pl.saleValue.toFixed(2)}
                         </SelectItem>
@@ -2022,7 +2022,7 @@ export function ClientTable() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Painel</Label>
-                  <Select value={selectedPanelId} onValueChange={setSelectedPanelId}>
+                  <Select value={selectedPanelId} onValueChange={(value) => { setSelectedPanelId(value); setSelectedPlanId(""); }}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
                       <SelectValue placeholder="Selecione um painel" />
                     </SelectTrigger>
@@ -2036,12 +2036,12 @@ export function ClientTable() {
 
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Plano</Label>
-                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
+                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={!selectedPanelId}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
-                      <SelectValue placeholder="Selecione um plano" />
+                      <SelectValue placeholder={selectedPanelId ? "Selecione um plano" : "Selecione um painel primeiro"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {(plans || []).map(pl => (
+                      {(plans || []).filter(pl => pl.panelId === selectedPanelId).map(pl => (
                         <SelectItem key={pl.id} value={pl.id}>
                           {pl.name} - R$ {pl.saleValue.toFixed(2)}
                         </SelectItem>

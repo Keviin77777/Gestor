@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { PlusCircle, MoreVertical, Edit, Trash2, CalendarIcon, Search, Filter, Grid, List, Eye } from "lucide-react";
+import { PlusCircle, MoreVertical, Edit, Trash2, CalendarIcon, Search, Grid, List, Eye, Server, Users, DollarSign, Zap, Shield } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Panel, Plan, Client } from "@/lib/definitions";
 import {
@@ -97,9 +97,9 @@ export default function PlansPage() {
         return clients?.filter(client => client.planId === planId && client.status === 'active').length || 0;
     };
 
-    // Filtered and sorted plans
-    const filteredAndSortedPlans = useMemo(() => {
-        if (!plans) return [];
+    // Grouped plans by server
+    const groupedPlans = useMemo(() => {
+        if (!plans || !panels) return {};
 
         let filtered = plans.filter(plan => {
             const matchesSearch = plan.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -112,38 +112,53 @@ export default function PlansPage() {
             return matchesSearch && matchesPanel && matchesDuration;
         });
 
-        // Sort plans
-        filtered.sort((a, b) => {
-            let aValue: any, bValue: any;
-            
-            switch (sortBy) {
-                case 'name':
-                    aValue = a.name.toLowerCase();
-                    bValue = b.name.toLowerCase();
-                    break;
-                case 'price':
-                    aValue = a.saleValue;
-                    bValue = b.saleValue;
-                    break;
-                case 'duration':
-                    aValue = a.duration;
-                    bValue = b.duration;
-                    break;
-                case 'clients':
-                    aValue = getActiveClientsForPlan(a.id);
-                    bValue = getActiveClientsForPlan(b.id);
-                    break;
-                default:
-                    return 0;
+        // Group by panel
+        const grouped = filtered.reduce((acc, plan) => {
+            const panelId = plan.panelId;
+            if (!acc[panelId]) {
+                acc[panelId] = [];
             }
+            acc[panelId].push(plan);
+            return acc;
+        }, {} as Record<string, Plan[]>);
 
-            if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
-            if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
-            return 0;
+        // Sort plans within each group
+        Object.keys(grouped).forEach(panelId => {
+            grouped[panelId].sort((a, b) => {
+                let aValue: any, bValue: any;
+                
+                switch (sortBy) {
+                    case 'name':
+                        aValue = a.name.toLowerCase();
+                        bValue = b.name.toLowerCase();
+                        break;
+                    case 'price':
+                        aValue = a.saleValue;
+                        bValue = b.saleValue;
+                        break;
+                    case 'duration':
+                        aValue = a.duration;
+                        bValue = b.duration;
+                        break;
+                    case 'clients':
+                        aValue = getActiveClientsForPlan(a.id);
+                        bValue = getActiveClientsForPlan(b.id);
+                        break;
+                    default:
+                        return 0;
+                }
+
+                if (aValue < bValue) return sortOrder === 'asc' ? -1 : 1;
+                if (aValue > bValue) return sortOrder === 'asc' ? 1 : -1;
+                return 0;
+            });
         });
 
-        return filtered;
-    }, [plans, searchTerm, filterPanel, filterDuration, sortBy, sortOrder, clients]);
+        return grouped;
+    }, [plans, panels, searchTerm, filterPanel, filterDuration, sortBy, sortOrder, clients]);
+
+    // Get total count for badge
+    const totalPlansCount = Object.values(groupedPlans).reduce((sum, plans) => sum + plans.length, 0);
 
     const handleAddPlan = () => {
         if (!plansCollection || !resellerId) {
@@ -257,9 +272,9 @@ export default function PlansPage() {
                             <CardTitle className="flex items-center gap-2">
                                 <Eye className="h-5 w-5" />
                                 Seus Planos
-                                {filteredAndSortedPlans.length > 0 && (
+                                {totalPlansCount > 0 && (
                                     <Badge variant="secondary" className="ml-2">
-                                        {filteredAndSortedPlans.length}
+                                        {totalPlansCount}
                                     </Badge>
                                 )}
                             </CardTitle>
@@ -340,148 +355,279 @@ export default function PlansPage() {
                         </div>
                     )}
 
-                    {/* Table View */}
+                    {/* Table View - Grouped by Server */}
                     {!plansLoading && viewMode === 'table' && (
-                        <div className="border rounded-lg">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead 
-                                            className="cursor-pointer hover:bg-muted/50"
-                                            onClick={() => {
-                                                if (sortBy === 'name') {
-                                                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                                                } else {
-                                                    setSortBy('name');
-                                                    setSortOrder('asc');
-                                                }
-                                            }}
-                                        >
-                                            Plano {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
-                                        </TableHead>
-                                        <TableHead 
-                                            className="cursor-pointer hover:bg-muted/50"
-                                            onClick={() => {
-                                                if (sortBy === 'price') {
-                                                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                                                } else {
-                                                    setSortBy('price');
-                                                    setSortOrder('asc');
-                                                }
-                                            }}
-                                        >
-                                            Valor {sortBy === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}
-                                        </TableHead>
-                                        <TableHead 
-                                            className="cursor-pointer hover:bg-muted/50"
-                                            onClick={() => {
-                                                if (sortBy === 'duration') {
-                                                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                                                } else {
-                                                    setSortBy('duration');
-                                                    setSortOrder('asc');
-                                                }
-                                            }}
-                                        >
-                                            Duração {sortBy === 'duration' && (sortOrder === 'asc' ? '↑' : '↓')}
-                                        </TableHead>
-                                        <TableHead>Servidor</TableHead>
-                                        <TableHead 
-                                            className="cursor-pointer hover:bg-muted/50"
-                                            onClick={() => {
-                                                if (sortBy === 'clients') {
-                                                    setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                                                } else {
-                                                    setSortBy('clients');
-                                                    setSortOrder('desc');
-                                                }
-                                            }}
-                                        >
-                                            Clientes {sortBy === 'clients' && (sortOrder === 'asc' ? '↑' : '↓')}
-                                        </TableHead>
-                                        <TableHead className="text-right">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredAndSortedPlans.map(plan => (
-                                        <TableRow key={plan.id} className="hover:bg-muted/50">
-                                            <TableCell>
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                                                        <span className="text-white font-bold text-xs">
-                                                            {plan.name.charAt(0).toUpperCase()}
-                                                        </span>
+                        <div className="space-y-6">
+                            {Object.keys(groupedPlans).length === 0 ? (
+                                <div className="text-center py-12 space-y-3">
+                                    <div className="mx-auto w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                                        <CalendarIcon className="h-8 w-8 text-slate-400" />
+                                    </div>
+                                    <p className="text-slate-500 font-medium">Nenhum plano encontrado</p>
+                                    <p className="text-sm text-slate-400">Crie planos para seus servidores</p>
+                                </div>
+                            ) : (
+                                Object.entries(groupedPlans).map(([panelId, serverPlans]) => {
+                                    const panel = panels?.find(p => p.id === panelId);
+                                    if (!panel || serverPlans.length === 0) return null;
+
+                                    return (
+                                        <div key={panelId} className="space-y-4">
+                                            {/* Enhanced Server Header */}
+                                            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-50 via-white to-slate-50 dark:from-slate-800 dark:via-slate-800/80 dark:to-slate-800 border border-slate-200 dark:border-slate-700 p-6 mb-6 shadow-sm hover:shadow-md transition-all duration-300">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="relative">
+                                                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-purple-600 flex items-center justify-center shadow-lg">
+                                                                <Server className="h-7 w-7 text-white" />
+                                                            </div>
+                                                            <div className="absolute -top-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center">
+                                                                <div className="w-2 h-2 bg-white rounded-full"></div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                                                                {panel.name}
+                                                            </h3>
+                                                            <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400">
+                                                                <div className="flex items-center gap-1">
+                                                                    <Zap className="h-4 w-4 text-blue-500" />
+                                                                    <span>{serverPlans.length} {serverPlans.length === 1 ? 'plano' : 'planos'}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <Users className="h-4 w-4 text-emerald-500" />
+                                                                    <span>{serverPlans.reduce((sum, plan) => sum + getActiveClientsForPlan(plan.id), 0)} clientes ativos</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1">
+                                                                    <DollarSign className="h-4 w-4 text-green-500" />
+                                                                    <span>R$ {serverPlans.reduce((sum, plan) => sum + (plan.saleValue * getActiveClientsForPlan(plan.id)), 0).toFixed(0)} receita</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <div className="font-medium">{plan.name}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 px-3 py-1">
+                                                            <Shield className="h-3 w-3 mr-1" />
+                                                            Ativo
+                                                        </Badge>
                                                     </div>
                                                 </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="font-semibold text-green-600">
-                                                    R$ {plan.saleValue.toFixed(2).replace('.', ',')}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant="outline" className="font-medium">
-                                                    {formatDuration(plan.duration)}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant="secondary">
-                                                    {panels?.find(p => p.id === plan.panelId)?.name || 'N/A'}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                                                    <span className="font-medium">
-                                                        {getActiveClientsForPlan(plan.id)}
-                                                    </span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-right">
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="sm">
-                                                            <MoreVertical className="h-4 w-4" />
-                                                        </Button>
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={() => handleEditPlan(plan)}>
-                                                            <Edit className="mr-2 h-4 w-4" />
-                                                            Editar
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem 
-                                                            onClick={() => handleDeletePlan(plan)}
-                                                            className="text-red-600"
-                                                        >
-                                                            <Trash2 className="mr-2 h-4 w-4" />
-                                                            Excluir
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                </TableBody>
-                            </Table>
+                                                
+                                                {/* Decorative elements */}
+                                                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-500/5 to-purple-500/5 rounded-full blur-2xl"></div>
+                                                <div className="absolute bottom-0 left-0 w-24 h-24 bg-gradient-to-tr from-emerald-500/5 to-blue-500/5 rounded-full blur-xl"></div>
+                                            </div>
+
+                                            {/* Plans Table for this Server */}
+                                            <div className="border rounded-lg overflow-hidden">
+                                                <Table>
+                                                    <TableHeader>
+                                                        <TableRow className="bg-slate-50 dark:bg-slate-800/50">
+                                                            <TableHead 
+                                                                className="cursor-pointer hover:bg-muted/50"
+                                                                onClick={() => {
+                                                                    if (sortBy === 'name') {
+                                                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                                                    } else {
+                                                                        setSortBy('name');
+                                                                        setSortOrder('asc');
+                                                                    }
+                                                                }}
+                                                            >
+                                                                Plano {sortBy === 'name' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                                            </TableHead>
+                                                            <TableHead 
+                                                                className="cursor-pointer hover:bg-muted/50"
+                                                                onClick={() => {
+                                                                    if (sortBy === 'price') {
+                                                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                                                    } else {
+                                                                        setSortBy('price');
+                                                                        setSortOrder('asc');
+                                                                    }
+                                                                }}
+                                                            >
+                                                                Valor {sortBy === 'price' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                                            </TableHead>
+                                                            <TableHead 
+                                                                className="cursor-pointer hover:bg-muted/50"
+                                                                onClick={() => {
+                                                                    if (sortBy === 'duration') {
+                                                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                                                    } else {
+                                                                        setSortBy('duration');
+                                                                        setSortOrder('asc');
+                                                                    }
+                                                                }}
+                                                            >
+                                                                Duração {sortBy === 'duration' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                                            </TableHead>
+                                                            <TableHead 
+                                                                className="cursor-pointer hover:bg-muted/50"
+                                                                onClick={() => {
+                                                                    if (sortBy === 'clients') {
+                                                                        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                                                    } else {
+                                                                        setSortBy('clients');
+                                                                        setSortOrder('desc');
+                                                                    }
+                                                                }}
+                                                            >
+                                                                Clientes {sortBy === 'clients' && (sortOrder === 'asc' ? '↑' : '↓')}
+                                                            </TableHead>
+                                                            <TableHead className="text-right">Ações</TableHead>
+                                                        </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                        {serverPlans.map(plan => (
+                                                            <TableRow key={plan.id} className="hover:bg-muted/50">
+                                                                <TableCell>
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="relative">
+                                                                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 flex items-center justify-center shadow-md">
+                                                                                <Zap className="h-5 w-5 text-white" />
+                                                                            </div>
+                                                                            <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border border-white dark:border-slate-800"></div>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div className="font-semibold text-slate-900 dark:text-white">{plan.name}</div>
+                                                                        </div>
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <div className="font-semibold text-green-600">
+                                                                        R$ {plan.saleValue.toFixed(2).replace('.', ',')}
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <Badge variant="outline" className="font-medium">
+                                                                        {formatDuration(plan.duration)}
+                                                                    </Badge>
+                                                                </TableCell>
+                                                                <TableCell>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                                                                        <span className="font-medium">
+                                                                            {getActiveClientsForPlan(plan.id)}
+                                                                        </span>
+                                                                    </div>
+                                                                </TableCell>
+                                                                <TableCell className="text-right">
+                                                                    <DropdownMenu>
+                                                                        <DropdownMenuTrigger asChild>
+                                                                            <Button variant="ghost" size="sm">
+                                                                                <MoreVertical className="h-4 w-4" />
+                                                                            </Button>
+                                                                        </DropdownMenuTrigger>
+                                                                        <DropdownMenuContent align="end">
+                                                                            <DropdownMenuItem onClick={() => handleEditPlan(plan)}>
+                                                                                <Edit className="mr-2 h-4 w-4" />
+                                                                                Editar
+                                                                            </DropdownMenuItem>
+                                                                            <DropdownMenuItem 
+                                                                                onClick={() => handleDeletePlan(plan)}
+                                                                                className="text-red-600"
+                                                                            >
+                                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                                Excluir
+                                                                            </DropdownMenuItem>
+                                                                        </DropdownMenuContent>
+                                                                    </DropdownMenu>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        ))}
+                                                    </TableBody>
+                                                </Table>
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
                         </div>
                     )}
 
-                    {/* Grid View */}
+                    {/* Grid View - Grouped by Server */}
                     {!plansLoading && viewMode === 'grid' && (
-                        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                            {filteredAndSortedPlans.map(plan => (
-                                <Card key={plan.id} className="group relative overflow-hidden border-0 bg-gradient-to-br from-white to-slate-50/50 dark:from-slate-900 dark:to-slate-800/50 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-[1.02]">
+                        <div className="space-y-8">
+                            {Object.keys(groupedPlans).length === 0 ? (
+                                <div className="text-center py-12 space-y-3">
+                                    <div className="mx-auto w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                                        <CalendarIcon className="h-8 w-8 text-slate-400" />
+                                    </div>
+                                    <p className="text-slate-500 font-medium">Nenhum plano encontrado</p>
+                                    <p className="text-sm text-slate-400">Crie planos para seus servidores</p>
+                                </div>
+                            ) : (
+                                Object.entries(groupedPlans).map(([panelId, serverPlans]) => {
+                                    const panel = panels?.find(p => p.id === panelId);
+                                    if (!panel || serverPlans.length === 0) return null;
+
+                                    return (
+                                        <div key={panelId} className="space-y-4">
+                                            {/* Enhanced Server Header for Grid */}
+                                            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-50 via-white to-slate-50 dark:from-slate-800 dark:via-slate-800/80 dark:to-slate-800 border border-slate-200 dark:border-slate-700 p-6 mb-8 shadow-sm hover:shadow-lg transition-all duration-300">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="relative">
+                                                            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-purple-600 flex items-center justify-center shadow-xl">
+                                                                <Server className="h-8 w-8 text-white" />
+                                                            </div>
+                                                            <div className="absolute -top-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center">
+                                                                <div className="w-2.5 h-2.5 bg-white rounded-full"></div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <h3 className="text-2xl font-bold text-slate-900 dark:text-white">
+                                                                {panel.name}
+                                                            </h3>
+                                                            <div className="flex items-center gap-6 text-sm text-slate-600 dark:text-slate-400">
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <Zap className="h-4 w-4 text-blue-500" />
+                                                                    <span className="font-medium">{serverPlans.length} {serverPlans.length === 1 ? 'plano' : 'planos'}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <Users className="h-4 w-4 text-emerald-500" />
+                                                                    <span className="font-medium">{serverPlans.reduce((sum, plan) => sum + getActiveClientsForPlan(plan.id), 0)} clientes</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <DollarSign className="h-4 w-4 text-green-500" />
+                                                                    <span className="font-medium">R$ {serverPlans.reduce((sum, plan) => sum + (plan.saleValue * getActiveClientsForPlan(plan.id)), 0).toFixed(0)}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col items-end gap-2">
+                                                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 px-3 py-1.5">
+                                                            <Shield className="h-3 w-3 mr-1" />
+                                                            Online
+                                                        </Badge>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                            Última sync: agora
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Enhanced decorative elements */}
+                                                <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-blue-500/8 to-purple-500/8 rounded-full blur-3xl"></div>
+                                                <div className="absolute bottom-0 left-0 w-32 h-32 bg-gradient-to-tr from-emerald-500/8 to-blue-500/8 rounded-full blur-2xl"></div>
+                                                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-64 h-1 bg-gradient-to-r from-transparent via-blue-500/10 to-transparent"></div>
+                                            </div>
+
+                                            {/* Plans Grid for this Server */}
+                                            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                                                {serverPlans.map(plan => (
+                                <Card key={plan.id} className="group relative overflow-hidden border border-slate-200/50 dark:border-slate-700/50 bg-gradient-to-br from-white via-slate-50/30 to-white dark:from-slate-900 dark:via-slate-800/50 dark:to-slate-900 shadow-lg hover:shadow-2xl transition-all duration-500 hover:scale-[1.03] hover:border-blue-300/50 dark:hover:border-blue-600/50">
                                     <CardHeader className="pb-4">
                                         <div className="flex items-start justify-between">
                                             <div className="space-y-2">
                                                 <div className="flex items-center gap-3">
-                                                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
-                                                        <span className="text-white font-bold text-sm">
-                                                            {plan.name.charAt(0).toUpperCase()}
-                                                        </span>
+                                                    <div className="relative">
+                                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 flex items-center justify-center shadow-lg">
+                                                            <Zap className="h-6 w-6 text-white" />
+                                                        </div>
+                                                        <div className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 rounded-full border-2 border-white dark:border-slate-800 flex items-center justify-center">
+                                                            <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
+                                                        </div>
                                                     </div>
                                                     <div>
                                                         <CardTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
@@ -520,68 +666,92 @@ export default function PlansPage() {
                                     </CardHeader>
                                     
                                     <CardContent className="space-y-4">
-                                        {/* Valor em destaque */}
-                                        <div className="text-center py-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl border border-green-200/50 dark:border-green-800/50">
-                                            <div className="text-xs text-green-600 dark:text-green-400 font-medium uppercase tracking-wide mb-1">
-                                                Valor Mensal
-                                            </div>
-                                            <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-                                                R$ {plan.saleValue.toFixed(2).replace('.', ',')}
+                                        {/* Enhanced Pricing Display */}
+                                        <div className="relative overflow-hidden">
+                                            <div className="text-center py-6 bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50 dark:from-emerald-900/20 dark:via-green-900/20 dark:to-teal-900/20 rounded-2xl border border-emerald-200/50 dark:border-emerald-800/50 shadow-sm">
+                                                <div className="flex items-center justify-center gap-1 mb-2">
+                                                    <DollarSign className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                                    <div className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold uppercase tracking-wider">
+                                                        Valor Mensal
+                                                    </div>
+                                                </div>
+                                                <div className="text-3xl font-bold text-emerald-700 dark:text-emerald-300 mb-1">
+                                                    R$ {plan.saleValue.toFixed(2).replace('.', ',')}
+                                                </div>
+
+                                                
+                                                {/* Decorative elements */}
+                                                <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 rounded-full blur-xl"></div>
+                                                <div className="absolute bottom-0 left-0 w-12 h-12 bg-gradient-to-tr from-green-500/10 to-emerald-500/10 rounded-full blur-lg"></div>
                                             </div>
                                         </div>
 
-                                        {/* Informações do plano */}
+                                        {/* Enhanced Plan Information */}
                                         <div className="space-y-3">
-                                            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                                                <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Servidor</span>
-                                                <Badge variant="secondary" className="bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-200">
+                                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-slate-50 to-slate-100/50 dark:from-slate-800/50 dark:to-slate-800/30 rounded-xl border border-slate-200/50 dark:border-slate-700/50">
+                                                <div className="flex items-center gap-2">
+                                                    <Server className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+                                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Servidor</span>
+                                                </div>
+                                                <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 px-3 py-1">
                                                     {panels?.find(p => p.id === plan.panelId)?.name || 'N/A'}
                                                 </Badge>
                                             </div>
                                             
-                                            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
-                                                <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Clientes Ativos</span>
+                                            <div className="flex items-center justify-between p-4 bg-gradient-to-r from-blue-50 to-blue-100/50 dark:from-blue-900/20 dark:to-blue-900/10 rounded-xl border border-blue-200/50 dark:border-blue-800/50">
+                                                <div className="flex items-center gap-2">
+                                                    <Users className="h-4 w-4 text-blue-500" />
+                                                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Clientes Ativos</span>
+                                                </div>
                                                 <div className="flex items-center gap-2">
                                                     <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                                                    <span className="font-bold text-blue-600 dark:text-blue-400">
+                                                    <span className="font-bold text-blue-600 dark:text-blue-400 text-lg">
                                                         {getActiveClientsForPlan(plan.id)}
                                                     </span>
                                                 </div>
                                             </div>
+
+
                                         </div>
 
-                                        {/* Ações rápidas */}
-                                        <div className="flex gap-2 pt-2">
+                                        {/* Enhanced Actions */}
+                                        <div className="flex gap-3 pt-4 border-t border-slate-200 dark:border-slate-700 mt-4">
                                             <Button
                                                 size="sm"
                                                 variant="outline"
                                                 onClick={() => handleEditPlan(plan)}
-                                                className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:hover:bg-blue-900/40 dark:text-blue-300 dark:border-blue-800"
+                                                className="flex-1 bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-700 border-blue-300 dark:from-blue-900/20 dark:to-blue-900/30 dark:hover:from-blue-900/30 dark:hover:to-blue-900/40 dark:text-blue-300 dark:border-blue-700 shadow-sm hover:shadow-md transition-all duration-200"
                                             >
-                                                <Edit className="mr-2 h-3 w-3" />
-                                                Editar
+                                                <Edit className="mr-2 h-4 w-4" />
+                                                Editar Plano
                                             </Button>
                                             <Button
                                                 size="sm"
                                                 variant="outline"
                                                 onClick={() => handleDeletePlan(plan)}
-                                                className="bg-red-50 hover:bg-red-100 text-red-700 border-red-200 dark:bg-red-900/20 dark:hover:bg-red-900/40 dark:text-red-300 dark:border-red-800"
+                                                className="bg-gradient-to-r from-red-50 to-red-100 hover:from-red-100 hover:to-red-200 text-red-700 border-red-300 dark:from-red-900/20 dark:to-red-900/30 dark:hover:from-red-900/30 dark:hover:to-red-900/40 dark:text-red-300 dark:border-red-700 shadow-sm hover:shadow-md transition-all duration-200"
                                             >
-                                                <Trash2 className="h-3 w-3" />
+                                                <Trash2 className="h-4 w-4" />
                                             </Button>
                                         </div>
                                     </CardContent>
                                     
-                                    {/* Decorative elements */}
-                                    <div className="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-gradient-to-br from-blue-400/10 to-purple-500/10 group-hover:scale-110 transition-transform duration-500"></div>
-                                    <div className="absolute -left-4 -bottom-4 h-16 w-16 rounded-full bg-gradient-to-br from-green-400/10 to-blue-500/10 group-hover:scale-110 transition-transform duration-500"></div>
+                                    {/* Enhanced Decorative elements */}
+                                    <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-gradient-to-br from-blue-500/8 via-purple-500/8 to-emerald-500/8 group-hover:scale-125 transition-transform duration-700 blur-2xl"></div>
+                                    <div className="absolute -left-6 -bottom-6 h-24 w-24 rounded-full bg-gradient-to-tr from-emerald-500/8 via-teal-500/8 to-blue-500/8 group-hover:scale-125 transition-transform duration-700 blur-xl"></div>
+                                    <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full h-px bg-gradient-to-r from-transparent via-blue-500/5 to-transparent group-hover:via-blue-500/10 transition-all duration-500"></div>
                                 </Card>
-                            ))}
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })
+                            )}
                         </div>
                     )}
 
                     {/* Empty State */}
-                    {!plansLoading && filteredAndSortedPlans.length === 0 && (
+                    {!plansLoading && totalPlansCount === 0 && (
                         <div className="flex flex-col items-center justify-center py-12 text-center">
                             <div className="rounded-full bg-muted p-4 mb-4">
                                 <PlusCircle className="h-8 w-8 text-muted-foreground" />
