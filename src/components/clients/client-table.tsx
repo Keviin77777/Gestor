@@ -59,12 +59,12 @@ import {
 import type { Client, Plan, Panel, App } from "@/lib/definitions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection } from "firebase/firestore";
-import { addDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase/non-blocking-updates";
+import { useMySQL } from "@/lib/mysql-provider";
+import { useClients } from "@/hooks/use-clients";
+import { usePlans } from "@/hooks/use-plans";
+import { usePanels } from "@/hooks/use-panels";
+import { mysqlApi } from "@/lib/mysql-api-client";
 import { PaymentHistory } from "./payment-history";
-import { doc } from "firebase/firestore";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format, parseISO, addMonths, differenceInDays } from "date-fns";
@@ -74,57 +74,97 @@ import { validateSigmaPassword, getPasswordStrengthMessage } from "@/lib/passwor
 import type { Invoice } from "@/lib/definitions";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useInvoices } from "@/hooks/use-invoices";
+import { WhatsAppSendButton } from "@/components/whatsapp/whatsapp-send-button";
+import { useAutoWhatsApp } from "@/hooks/use-auto-whatsapp";
+import { WhatsAppAutoNotification, useWhatsAppAutoNotification } from "@/components/whatsapp/whatsapp-auto-notification";
+import { useAutoInvoiceGeneration } from "@/hooks/use-auto-invoice-generation";
+import { useAutoReminders } from "@/hooks/use-auto-reminders";
 
 const statusMap: { [key in Client['status']]: { text: string; className: string } } = {
   active: { text: "Ativo", className: "bg-green-100 text-green-800 border-green-200 hover:bg-green-100" },
   inactive: { text: "Inativo", className: "bg-gray-100 text-gray-800 border-gray-200 hover:bg-gray-100" },
-  late: { text: "Atrasado", className: "bg-red-100 text-red-800 border-red-200 hover:bg-red-100" },
+  suspended: { text: "Suspenso", className: "bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-100" },
+  expired: { text: "Expirado", className: "bg-red-100 text-red-800 border-red-200 hover:bg-red-100" },
 };
 
 export function ClientTable() {
   const [isDialogOpen, setIsDialogOpen] = React.useState(false);
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user } = useMySQL();
+  const resellerId = user?.id;
 
-  const clientsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'clients');
-  }, [firestore, resellerId]);
+  const { data: clients, isLoading: clientsLoading, error: clientsError, refetch } = useClients();
+  const { data: plans, isLoading: plansLoading, error: plansError } = usePlans();
+  const { data: panels, isLoading: panelsLoading, error: panelsError } = usePanels();
 
-  const { data, isLoading } = useCollection<Client>(clientsCollection);
+  // Consider all loading states
+  const isLoading = clientsLoading || plansLoading || panelsLoading;
 
-  // Plans and panels
-  const plansCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'plans');
-  }, [firestore, resellerId]);
-
-  const panelsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'panels');
-  }, [firestore, resellerId]);
-
-  const appsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'apps');
-  }, [firestore, resellerId]);
-
-  const { data: plans } = useCollection<Plan>(plansCollection);
-  const { data: panels } = useCollection<Panel>(panelsCollection);
-  const { data: apps } = useCollection<App>(appsCollection);
-
-  // Invoices collection
-  const invoicesCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'invoices');
-  }, [firestore, resellerId]);
-
-  const { data: invoices } = useCollection<Invoice>(invoicesCollection);
-
-  // Sigma Integration
+  // Sigma Integration - must be called before any conditional returns
   const sigmaIntegration = useSigmaIntegration();
 
-  // Form state
+  // Mock apps data for now - can be replaced with useApps hook when available
+  const apps: App[] = [];
+
+  // Use invoices hook to get all invoices
+  const { data: invoicesData, createInvoice: createInvoiceHook, refresh: refreshInvoices } = useInvoices();
+  const invoices = Array.isArray(invoicesData) ? invoicesData : [];
+
+  // WhatsApp notifications
+  const { notification, showNotification, hideNotification } = useWhatsAppAutoNotification();
+
+  // WhatsApp automation hook
+  const { sendBillingMessage } = useAutoWhatsApp({
+    showNotifications: false, // Usamos nossas próprias notificações
+    onSuccess: (clientName, clientPhone) => {
+      console.log(`✅ WhatsApp enviado com sucesso para ${clientName}`);
+      showNotification('success', clientName, clientPhone);
+    },
+    onError: (error, clientName) => {
+      console.error('❌ Erro no envio automático:', error);
+      showNotification('error', clientName, undefined, error);
+    },
+    onNoPhone: (clientName) => {
+      console.log(`⚠️ ${clientName} não possui WhatsApp`);
+      showNotification('no_phone', clientName);
+    },
+    onNotConnected: (clientName) => {
+      console.log(`⚠️ WhatsApp desconectado para ${clientName}`);
+      showNotification('not_connected', clientName);
+    }
+  });
+
+  // Auto invoice generation hook - DESABILITADO (agora usa cron job no backend)
+  useAutoInvoiceGeneration({
+    enabled: false, // Desabilitado - geração automática agora é feita via cron job no backend
+    daysBeforeExpiry: 10,
+    onInvoiceGenerated: (client, invoice) => {
+      // Atualizar dados silenciosamente
+      refetch();
+      refreshInvoices();
+    },
+    onError: (error, client) => {
+      console.error(`❌ Erro na geração automática para ${client.name}:`, error);
+    }
+  });
+
+  // Auto reminders hook - DESABILITADO (agora usa cron job no backend)
+  useAutoReminders({
+    enabled: false, // Desabilitado - lembretes automáticos agora são processados via cron job no backend
+    onReminderSent: (client, template, log) => {
+      // Silently track reminder sent
+    },
+    onReminderFailed: (client, template, error) => {
+      console.error(`❌ Erro no lembrete automático para ${client.name}:`, error);
+    },
+    onError: (error) => {
+      console.error('❌ Erro no sistema de lembretes:', error);
+    }
+  });
+
+
+
+  // Form state - all hooks must be called before any conditional returns
   const [clientName, setClientName] = React.useState("");
   const [clientPhone, setClientPhone] = React.useState("");
   const [clientUsername, setClientUsername] = React.useState("");
@@ -135,9 +175,9 @@ export function ClientTable() {
   const [selectedApps, setSelectedApps] = React.useState<string[]>([]);
   const [isAppsExpanded, setIsAppsExpanded] = React.useState(false);
   const [dueDate, setDueDate] = React.useState<Date | undefined>(undefined);
-  const [discountValue, setDiscountValue] = React.useState("");
-  const [useFixedValue, setUseFixedValue] = React.useState(false);
-  const [fixedValue, setFixedValue] = React.useState("");
+  const [discount_value, setDiscountValue] = React.useState("");
+  const [use_fixed_value, setUseFixedValue] = React.useState(false);
+  const [fixed_value, setFixedValue] = React.useState("");
   const [expandedClient, setExpandedClient] = React.useState<string | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false);
   const [editingClient, setEditingClient] = React.useState<Client | null>(null);
@@ -161,18 +201,59 @@ export function ClientTable() {
   const [clientToGenerate, setClientToGenerate] = React.useState<Client | null>(null);
   const [nextPeriodToGenerate, setNextPeriodToGenerate] = React.useState("");
 
-  const validatePhoneNumber = (value: string) => {
-    // Remove all non-numeric characters except + at the beginning
-    let cleaned = value.replace(/[^\d+]/g, '');
 
-    // If it starts with +, keep only the first + and remove others
-    if (cleaned.startsWith('+')) {
-      cleaned = '+' + cleaned.slice(1).replace(/\+/g, '');
-    }
 
-    // Limit to 15 characters (international standard)
-    return cleaned.slice(0, 15);
-  };
+  // Show loading state if user is not authenticated
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Carregando usuário...</p>
+
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state if data is loading
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Carregando dados...</p>
+          <p className="text-sm text-gray-500 mt-2">
+            Debug: clients={clientsLoading ? 'loading' : 'done'},
+            plans={plansLoading ? 'loading' : 'done'},
+            panels={panelsLoading ? 'loading' : 'done'}
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Clientes: {clients?.length || 0}, Planos: {plans?.length || 0}, Painéis: {panels?.length || 0}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+
+
+  // Add error boundary check
+  const error = clientsError || plansError || panelsError;
+  if (error) {
+    console.error('ClientTable: Error detected', error);
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="text-red-500 text-xl mb-4">❌</div>
+          <p className="text-red-600 dark:text-red-400">Erro ao carregar dados</p>
+          <p className="text-sm text-gray-500 mt-2">{error.message}</p>
+        </div>
+      </div>
+    );
+  }
+
+
 
   const resetForm = () => {
     setClientName("");
@@ -194,55 +275,32 @@ export function ClientTable() {
     setShowEditPassword(false);
   };
 
-  const isValidBrazilianPhone = (phone: string) => {
-    // Remove all non-numeric characters
-    const numbersOnly = phone.replace(/\D/g, '');
 
-    // Must have exactly 10 or 11 digits
+
+  // Validation functions
+  const validatePhoneNumber = (value: string) => {
+    const numbersOnly = value.replace(/\D/g, '');
+    return numbersOnly.slice(0, 15);
+  };
+
+  const isValidBrazilianPhone = (phone: string) => {
+    const numbersOnly = phone.replace(/\D/g, '');
     if (numbersOnly.length !== 10 && numbersOnly.length !== 11) {
       return false;
     }
-
-    // Extract area code (first 2 digits)
     const areaCode = numbersOnly.substring(0, 2);
-
-    // Valid Brazilian area codes (11-99)
     const validAreaCodes = [
-      '11', '12', '13', '14', '15', '16', '17', '18', '19', // São Paulo
-      '21', '22', '24', // Rio de Janeiro
-      '27', '28', // Espírito Santo
-      '31', '32', '33', '34', '35', '37', '38', // Minas Gerais
-      '41', '42', '43', '44', '45', '46', // Paraná
-      '47', '48', '49', // Santa Catarina
-      '51', '53', '54', '55', // Rio Grande do Sul
-      '61', // Distrito Federal
-      '62', '64', // Goiás
-      '63', // Tocantins
-      '65', '66', // Mato Grosso
-      '67', // Mato Grosso do Sul
-      '68', // Acre
-      '69', // Rondônia
-      '71', '73', '74', '75', '77', // Bahia
-      '79', // Sergipe
-      '81', '87', // Pernambuco
-      '82', // Alagoas
-      '83', // Paraíba
-      '84', // Rio Grande do Norte
-      '85', '88', // Ceará
-      '86', '89', // Piauí
-      '91', '93', '94', // Pará
-      '92', '97', // Amazonas
-      '95', // Roraima
-      '96', // Amapá
-      '98', '99'  // Maranhão
+      '11', '12', '13', '14', '15', '16', '17', '18', '19',
+      '21', '22', '24', '27', '28', '31', '32', '33', '34', '35', '37', '38',
+      '41', '42', '43', '44', '45', '46', '47', '48', '49',
+      '51', '53', '54', '55', '61', '62', '63', '64', '65', '66', '67', '68', '69',
+      '71', '73', '74', '75', '77', '79', '81', '82', '83', '84', '85', '86', '87', '88', '89',
+      '91', '92', '93', '94', '95', '96', '97', '98', '99'
     ];
-
     if (!validAreaCodes.includes(areaCode)) {
       return false;
     }
-
     if (numbersOnly.length === 11) {
-      // Mobile phone: must start with 9 after area code
       const firstDigit = numbersOnly.substring(2, 3);
       if (firstDigit !== '9') {
         return false;
@@ -357,7 +415,7 @@ export function ClientTable() {
 
     // Check if Sigma validation is needed
     const currentPanel = panels?.find(p => p.id === selectedPanelId);
-    if (currentPanel?.sigmaConnected && value.length > 0) {
+    if (currentPanel?.sigma_connected && value.length > 0) {
       const validation = validateSigmaPassword(value);
       if (!validation.isValid) {
         setPasswordError(`Senha fraca para Sigma IPTV. Necessário: ${validation.errors.join(', ')}`);
@@ -367,8 +425,8 @@ export function ClientTable() {
     }
   };
 
-  const handleSaveClient = () => {
-    if (!clientsCollection || !resellerId) {
+  const handleSaveClient = async () => {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -396,7 +454,7 @@ export function ClientTable() {
     // Check password strength for Sigma IPTV if panel is connected (warning only)
     const panelForSave = panels?.find(p => p.id === selectedPanelId);
     let showPasswordWarning = false;
-    if (panelForSave?.sigmaConnected && clientPassword.trim()) {
+    if (panelForSave?.sigma_connected && clientPassword.trim()) {
       const passwordValidation = validateSigmaPassword(clientPassword.trim());
       if (!passwordValidation.isValid) {
         showPasswordWarning = true;
@@ -405,45 +463,51 @@ export function ClientTable() {
     }
 
     const plan = (plans || []).find(p => p.id === selectedPlanId);
-    const basePrice = useFixedValue ? parseFloat(fixedValue) : (plan?.saleValue ?? 0);
-    const discount = parseFloat(discountValue || '0');
-    const paymentValue = Math.max(0, (isNaN(basePrice) ? 0 : basePrice) - (isNaN(discount) ? 0 : discount));
+    const basePrice = use_fixed_value ? parseFloat(fixed_value) : (plan?.value ?? 0);
+    const discount = parseFloat(discount_value || '0');
+    const value = Math.max(0, (isNaN(basePrice) ? 0 : basePrice) - (isNaN(discount) ? 0 : discount));
 
     const newClient: Partial<Client> & {
       phone?: string;
       username?: string;
       password?: string;
       note?: string;
-      panelId?: string;
-      discountValue?: number;
-      useFixedValue?: boolean;
-      fixedValue?: number;
+      panel_id?: string;
+      discount_value?: number;
+      use_fixed_value?: boolean;
+      fixed_value?: number;
       apps?: string[];
     } = {
-      resellerId,
+      reseller_id: resellerId,
       name: clientName.trim(),
-      startDate: format(new Date(), 'yyyy-MM-dd'),
-      planId: selectedPlanId,
-      paymentValue,
+      start_date: format(new Date(), 'yyyy-MM-dd'),
+      plan_id: selectedPlanId,
+      value,
       status: 'active',
-      renewalDate: format(dueDate, 'yyyy-MM-dd'),
+      renewal_date: format(dueDate, 'yyyy-MM-dd'),
       phone: clientPhone.trim(),
       username: clientUsername.trim(),
       password: clientPassword.trim(),
       notes: clientNotes.trim(),
-      panelId: selectedPanelId,
-      discountValue: isNaN(discount) ? 0 : discount,
-      useFixedValue,
-      fixedValue: isNaN(basePrice) ? 0 : basePrice,
-      ...(selectedApps.length > 0 && { apps: selectedApps }),
+      panel_id: selectedPanelId,
+      discount_value: isNaN(discount) ? 0 : discount,
+      use_fixed_value,
+      fixed_value: isNaN(basePrice) ? 0 : basePrice,
+      apps: selectedApps.length > 0 ? selectedApps : undefined,
     };
 
     // Save client to database
-    addDocumentNonBlocking(clientsCollection, newClient);
+    try {
+      await mysqlApi.createClient(newClient);
+      refetch(); // Refresh the clients list
+    } catch (error) {
+      console.error('Error creating client:', error);
+      alert('Erro ao criar cliente. Tente novamente.');
+    }
 
     // Auto-create in Sigma if panel is connected and client has credentials
     const panelForSigma = panels?.find(p => p.id === selectedPanelId);
-    if (panelForSigma?.sigmaConnected && clientUsername.trim() && clientPassword.trim()) {
+    if (panelForSigma?.sigma_connected && clientUsername.trim() && clientPassword.trim()) {
       const plan = plans?.find(p => p.id === selectedPlanId);
       if (plan) {
         // Create client in Sigma asynchronously
@@ -453,7 +517,7 @@ export function ClientTable() {
           name: clientName.trim(),
           whatsapp: clientPhone.trim(),
           note: clientNotes.trim(),
-          packageId: panelForSigma.sigmaDefaultPackageId || "BV4D3rLaqZ" // Use configured or default package ID
+          packageId: panelForSigma.sigma_default_package_id || "BV4D3rLaqZ" // Use configured or default package ID
         }).then(result => {
           if (result.success) {
             console.log('✅ Cliente criado automaticamente no Sigma IPTV');
@@ -486,21 +550,21 @@ export function ClientTable() {
     setClientUsername(client.username || '');
     setClientPassword(client.password || '');
     setClientNotes(client.notes || '');
-    setSelectedPlanId(client.planId);
-    setSelectedPanelId(client.panelId || '');
+    setSelectedPlanId(client.plan_id || '');
+    setSelectedPanelId(client.panel_id || '');
     setSelectedApps((client as any).apps || []);
     setIsAppsExpanded(false);
     // Parse date safely to avoid timezone issues
-    const [year, month, day] = client.renewalDate.split('-');
+    const [year, month, day] = client.renewal_date.split('-');
     setDueDate(new Date(parseInt(year), parseInt(month) - 1, parseInt(day)));
-    setDiscountValue(client.discountValue?.toString() || '');
-    setUseFixedValue(client.useFixedValue || false);
-    setFixedValue(client.fixedValue?.toString() || '');
+    setDiscountValue(client.discount_value?.toString() || '');
+    setUseFixedValue(client.use_fixed_value || false);
+    setFixedValue(client.fixed_value?.toString() || '');
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdateClient = () => {
-    if (!editingClient || !clientsCollection || !resellerId) {
+  const handleUpdateClient = async () => {
+    if (!editingClient || !resellerId || !resellerId) {
       alert('Erro: dados não encontrados.');
       return;
     }
@@ -528,7 +592,7 @@ export function ClientTable() {
     // Check password strength for Sigma IPTV if panel is connected (warning only)
     const panelForUpdate = panels?.find(p => p.id === selectedPanelId);
     let showPasswordWarningUpdate = false;
-    if (panelForUpdate?.sigmaConnected && clientPassword.trim()) {
+    if (panelForUpdate?.sigma_connected && clientPassword.trim()) {
       const passwordValidation = validateSigmaPassword(clientPassword.trim());
       if (!passwordValidation.isValid) {
         showPasswordWarningUpdate = true;
@@ -537,28 +601,34 @@ export function ClientTable() {
     }
 
     const plan = (plans || []).find(p => p.id === selectedPlanId);
-    const basePrice = useFixedValue ? parseFloat(fixedValue) : (plan?.saleValue ?? 0);
-    const discount = parseFloat(discountValue || '0');
-    const paymentValue = Math.max(0, (isNaN(basePrice) ? 0 : basePrice) - (isNaN(discount) ? 0 : discount));
+    const basePrice = use_fixed_value ? parseFloat(fixed_value) : (plan?.value ?? 0);
+    const discount = parseFloat(discount_value || '0');
+    const value = Math.max(0, (isNaN(basePrice) ? 0 : basePrice) - (isNaN(discount) ? 0 : discount));
 
     const updatedClient: Partial<Client> & { apps?: string[] } = {
       name: clientName.trim(),
-      planId: selectedPlanId,
-      paymentValue,
-      renewalDate: format(dueDate, 'yyyy-MM-dd'),
+      plan_id: selectedPlanId,
+      value,
+      renewal_date: format(dueDate, 'yyyy-MM-dd'),
       phone: clientPhone.trim(),
       username: clientUsername.trim(),
       password: clientPassword.trim(),
       notes: clientNotes.trim(),
-      panelId: selectedPanelId,
-      discountValue: isNaN(discount) ? 0 : discount,
-      useFixedValue,
-      fixedValue: isNaN(basePrice) ? 0 : basePrice,
-      ...(selectedApps.length > 0 && { apps: selectedApps }),
+      panel_id: selectedPanelId,
+      discount_value: isNaN(discount) ? 0 : discount,
+      use_fixed_value,
+      fixed_value: isNaN(basePrice) ? 0 : basePrice,
+      apps: selectedApps.length > 0 ? selectedApps : undefined,
     };
 
-    const clientRef = doc(firestore, 'resellers', resellerId, 'clients', editingClient.id);
-    updateDocumentNonBlocking(clientRef, updatedClient);
+    // Client reference removed - using MySQL API
+    try {
+      await mysqlApi.updateClient(editingClient.id, updatedClient);
+      refetch(); // Refresh the clients list
+    } catch (error) {
+      console.error('Error updating client:', error);
+      alert('Erro ao atualizar cliente. Tente novamente.');
+    }
     resetForm();
     setIsEditDialogOpen(false);
     setEditingClient(null);
@@ -572,7 +642,7 @@ export function ClientTable() {
   };
 
   const handleDeleteClient = async (client: Client) => {
-    if (!clientsCollection || !resellerId) {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -580,8 +650,14 @@ export function ClientTable() {
     const confirmDelete = window.confirm(`Tem certeza que deseja excluir o cliente "${client.name}"? Esta ação não pode ser desfeita.`);
     if (!confirmDelete) return;
 
-    const clientRef = doc(firestore, 'resellers', resellerId, 'clients', client.id);
-    deleteDocumentNonBlocking(clientRef);
+    // Client reference removed - using MySQL API
+    try {
+      await mysqlApi.deleteClient(client.id);
+      refetch(); // Refresh the clients list
+    } catch (error) {
+      console.error('Error deleting client:', error);
+      alert('Erro ao excluir cliente. Tente novamente.');
+    }
   };
 
   // Sigma IPTV Integration Functions
@@ -591,14 +667,14 @@ export function ClientTable() {
       return;
     }
 
-    const clientPlan = plans?.find(p => p.id === client.planId);
+    const clientPlan = plans?.find(p => p.id === client.plan_id);
     if (!clientPlan) {
       alert('Plano do cliente não encontrado.');
       return;
     }
 
-    const clientPanel = panels?.find(p => p.id === clientPlan.panelId);
-    if (!clientPanel?.sigmaConnected) {
+    const clientPanel = panels?.find(p => p.id === clientPlan.panel_id);
+    if (!clientPanel?.sigma_connected) {
       alert('Painel não está conectado ao Sigma IPTV.');
       return;
     }
@@ -617,12 +693,18 @@ export function ClientTable() {
         alert('Cliente renovado com sucesso no Sigma IPTV!');
 
         // Update client renewal date in local database
-        const newRenewalDate = addMonths(parseISO(client.renewalDate), clientPlan.duration).toISOString();
-        const clientRef = doc(firestore, 'resellers', resellerId!, 'clients', client.id);
-        updateDocumentNonBlocking(clientRef, {
-          renewalDate: newRenewalDate,
-          status: 'active' as const
-        });
+        const newRenewalDate = addMonths(parseISO(client.renewal_date), clientPlan.duration_days).toISOString();
+        // Client reference removed - using MySQL API
+        try {
+          await mysqlApi.updateClient(client.id, {
+            renewal_date: newRenewalDate,
+            status: 'active' as const
+          });
+          refetch(); // Refresh the clients list
+        } catch (error) {
+          console.error('Error updating client renewal date:', error);
+          alert('Erro ao atualizar data de renovação. Tente novamente.');
+        }
       } else {
         alert(`Erro ao renovar cliente: ${result.error}`);
       }
@@ -638,14 +720,14 @@ export function ClientTable() {
       return;
     }
 
-    const clientPlan = plans?.find(p => p.id === client.planId);
+    const clientPlan = plans?.find(p => p.id === client.plan_id);
     if (!clientPlan) {
       alert('Plano do cliente não encontrado.');
       return;
     }
 
-    const clientPanel = panels?.find(p => p.id === clientPlan.panelId);
-    if (!clientPanel?.sigmaConnected) {
+    const clientPanel = panels?.find(p => p.id === clientPlan.panel_id);
+    if (!clientPanel?.sigma_connected) {
       alert('Painel não está conectado ao Sigma IPTV.');
       return;
     }
@@ -675,14 +757,14 @@ export function ClientTable() {
       return;
     }
 
-    const clientPlan = plans?.find(p => p.id === client.planId);
+    const clientPlan = plans?.find(p => p.id === client.plan_id);
     if (!clientPlan) {
       alert('Plano do cliente não encontrado.');
       return;
     }
 
-    const clientPanel = panels?.find(p => p.id === clientPlan.panelId);
-    if (!clientPanel?.sigmaConnected) {
+    const clientPanel = panels?.find(p => p.id === clientPlan.panel_id);
+    if (!clientPanel?.sigma_connected) {
       alert('Painel não está conectado ao Sigma IPTV.');
       return;
     }
@@ -714,14 +796,14 @@ export function ClientTable() {
       return;
     }
 
-    const clientPlan = plans?.find(p => p.id === client.planId);
+    const clientPlan = plans?.find(p => p.id === client.plan_id);
     if (!clientPlan) {
       alert('Plano do cliente não encontrado.');
       return;
     }
 
-    const clientPanel = panels?.find(p => p.id === clientPlan.panelId);
-    if (!clientPanel?.sigmaConnected) {
+    const clientPanel = panels?.find(p => p.id === clientPlan.panel_id);
+    if (!clientPanel?.sigma_connected) {
       alert('Painel não está conectado ao Sigma IPTV.');
       return;
     }
@@ -733,7 +815,7 @@ export function ClientTable() {
       const result = await sigmaIntegration.syncFromSigma(
         client,
         clientPanel,
-        firestore,
+        // firestore removed - using MySQL API
         resellerId!
       );
 
@@ -767,104 +849,138 @@ export function ClientTable() {
     setIsPaymentHistoryOpen(false);
   };
 
+  const handleClientUpdate = () => {
+    // Refresh automático silencioso da listagem de clientes
+    refetch();
+  };
+
   const handleGenerateInvoice = (client: Client) => {
-    if (!resellerId || !firestore) {
+    if (!resellerId) {
       return;
     }
 
     // Get all invoices for this client
-    const allInvoices = invoices?.filter(invoice => invoice.clientId === client.id) || [];
+    const allInvoices = invoices?.filter(invoice => invoice.client_id === client.id) || [];
+
+    // Check for pending invoices
+    const pendingInvoices = allInvoices.filter(invoice => invoice.status === 'pending');
 
     // Determine the target date for the new invoice
     const getTargetDueDate = () => {
-      let currentDate = parseISO(client.renewalDate);
-
-      // Keep checking months until we find one without an invoice
-      while (true) {
-        const dateString = format(currentDate, 'yyyy-MM-dd');
-        const existingInvoice = allInvoices.find(invoice => invoice.dueDate === dateString);
-
-        if (!existingInvoice) {
-          // Found a month without an invoice
-          return dateString;
-        }
-
-        // Move to next month
-        currentDate = addMonths(currentDate, 1);
-
-        // Safety check to prevent infinite loop (max 24 months ahead)
-        const monthsAhead = differenceInDays(currentDate, parseISO(client.renewalDate)) / 30;
-        if (monthsAhead > 24) {
-          break;
-        }
+      const today = new Date();
+      const renewalDay = parseISO(client.renewal_date).getDate();
+      
+      if (allInvoices.length === 0) {
+        // No invoices at all, generate for current month
+        const targetDate = new Date(today.getFullYear(), today.getMonth(), renewalDay);
+        return format(targetDate, 'yyyy-MM-dd');
       }
-
-      // Fallback
-      return format(addMonths(parseISO(client.renewalDate), 1), 'yyyy-MM-dd');
+      
+      // Find the most recent invoice by due_date
+      const sortedInvoices = allInvoices.sort((a, b) => 
+        new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
+      );
+      const mostRecentInvoice = sortedInvoices[0];
+      const mostRecentDueDate = parseISO(mostRecentInvoice.due_date);
+      
+      // Generate for the month after the most recent invoice
+      const nextMonth = addMonths(mostRecentDueDate, 1);
+      const targetDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), renewalDay);
+      return format(targetDate, 'yyyy-MM-dd');
     };
 
     const targetDueDate = getTargetDueDate();
     const targetDate = parseISO(targetDueDate);
     const periodName = format(targetDate, 'MMMM yyyy', { locale: ptBR });
 
-    // Show confirmation modal
+    // Show confirmation modal with additional info about pending invoices
     setClientToGenerate(client);
     setNextPeriodToGenerate(periodName);
     setConfirmGenerateOpen(true);
   };
 
   const confirmGenerateInvoice = async () => {
-    if (!resellerId || !firestore || !clientToGenerate) return;
+    if (!resellerId || !clientToGenerate) return;
 
-    const invoicesCollection = collection(firestore, 'resellers', resellerId, 'invoices');
-    const allInvoices = invoices?.filter(invoice => invoice.clientId === clientToGenerate.id) || [];
+    try {
+      // Get all invoices for this client
+      const allInvoices = invoices?.filter(invoice => invoice.client_id === clientToGenerate.id) || [];
 
-    const getTargetDueDate = () => {
-      let currentDate = parseISO(clientToGenerate.renewalDate);
+      // Check for pending invoices
+      const pendingInvoices = allInvoices.filter(invoice => invoice.status === 'pending');
 
-      // Keep checking months until we find one without an invoice
-      while (true) {
-        const dateString = format(currentDate, 'yyyy-MM-dd');
-        const existingInvoice = allInvoices.find(invoice => invoice.dueDate === dateString);
-
-        if (!existingInvoice) {
-          // Found a month without an invoice
-          return dateString;
+      // Determine the target date for the new invoice (same logic as handleGenerateInvoice)
+      const getTargetDueDate = () => {
+        const today = new Date();
+        const renewalDay = parseISO(clientToGenerate.renewal_date).getDate();
+        
+        if (allInvoices.length === 0) {
+          // No invoices at all, generate for current month
+          const targetDate = new Date(today.getFullYear(), today.getMonth(), renewalDay);
+          return format(targetDate, 'yyyy-MM-dd');
         }
+        
+        // Find the most recent invoice by due_date
+        const sortedInvoices = allInvoices.sort((a, b) => 
+          new Date(b.due_date).getTime() - new Date(a.due_date).getTime()
+        );
+        const mostRecentInvoice = sortedInvoices[0];
+        const mostRecentDueDate = parseISO(mostRecentInvoice.due_date);
+        
+        // Generate for the month after the most recent invoice
+        const nextMonth = addMonths(mostRecentDueDate, 1);
+        const targetDate = new Date(nextMonth.getFullYear(), nextMonth.getMonth(), renewalDay);
+        return format(targetDate, 'yyyy-MM-dd');
+      };
 
-        // Move to next month
-        currentDate = addMonths(currentDate, 1);
+      const targetDueDate = getTargetDueDate();
 
-        // Safety check to prevent infinite loop (max 24 months ahead)
-        const monthsAhead = differenceInDays(currentDate, parseISO(clientToGenerate.renewalDate)) / 30;
-        if (monthsAhead > 24) {
-          break;
-        }
-      }
+      // Generate new invoice
+      const newInvoice: Partial<Invoice> = {
+        id: `inv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        client_id: clientToGenerate.id,
+        reseller_id: resellerId,
+        due_date: targetDueDate,
+        issue_date: format(new Date(), 'yyyy-MM-dd'),
+        value: clientToGenerate.value,
+        discount: (clientToGenerate as any).discount_value || 0,
+        final_value: clientToGenerate.value - ((clientToGenerate as any).discount_value || 0),
+        status: 'pending',
+        description: `Mensalidade - ${nextPeriodToGenerate}`
+      };
 
-      // Fallback
-      return format(addMonths(parseISO(clientToGenerate.renewalDate), 1), 'yyyy-MM-dd');
-    };
+      // Create invoice using the hook (this will auto-refresh the invoices list)
+      await createInvoiceHook(newInvoice);
 
-    const targetDueDate = getTargetDueDate();
+      // Show success message with toast
+      import('@/components/ui/toast-notification').then(({ showSuccessToast }) => {
+        showSuccessToast(`Fatura gerada com sucesso para ${nextPeriodToGenerate}!`);
+      });
 
-    // Generate new invoice
-    const newInvoice: Omit<Invoice, 'id'> = {
-      clientId: clientToGenerate.id,
-      resellerId,
-      dueDate: targetDueDate,
-      issueDate: format(new Date(), 'yyyy-MM-dd'),
-      value: clientToGenerate.paymentValue,
-      discount: (clientToGenerate as any).discountValue || 0,
-      finalValue: clientToGenerate.paymentValue - ((clientToGenerate as any).discountValue || 0),
-      status: 'pending',
-      description: `Mensalidade - ${nextPeriodToGenerate}`
-    };
+      // Atualizar dados silenciosamente (sem loading)
+      setTimeout(() => {
+        refetch();
+        refreshInvoices();
+      }, 100);
 
-    addDocumentNonBlocking(invoicesCollection, newInvoice);
-    setConfirmGenerateOpen(false);
-    setClientToGenerate(null);
+      // Enviar cobrança via WhatsApp automaticamente
+      await sendBillingMessage(
+        clientToGenerate,
+        newInvoice.final_value || 0,
+        targetDueDate,
+        `Mensalidade - ${nextPeriodToGenerate}`
+      );
+
+    } catch (error) {
+      console.error('Error creating invoice:', error);
+      alert('❌ Erro ao gerar fatura. Tente novamente.');
+    } finally {
+      setConfirmGenerateOpen(false);
+      setClientToGenerate(null);
+    }
   };
+
+
 
   return (
     <div className="space-y-6">
@@ -916,7 +1032,7 @@ export function ClientTable() {
               <div>
                 <p className="text-sm font-medium text-green-700 dark:text-green-300">Clientes Ativos</p>
                 <p className="text-2xl font-bold text-green-900 dark:text-green-100">
-                  {data?.filter(c => c.status === 'active').length || 0}
+                  {clients?.filter(c => c.status === 'active').length || 0}
                 </p>
               </div>
               <div className="rounded-full bg-green-500/20 p-3">
@@ -932,7 +1048,7 @@ export function ClientTable() {
               <div>
                 <p className="text-sm font-medium text-orange-700 dark:text-orange-300">Em Atraso</p>
                 <p className="text-2xl font-bold text-orange-900 dark:text-orange-100">
-                  {data?.filter(c => c.status === 'late').length || 0}
+                  {clients?.filter(c => c.status === 'expired').length || 0}
                 </p>
               </div>
               <div className="rounded-full bg-orange-500/20 p-3">
@@ -948,7 +1064,7 @@ export function ClientTable() {
               <div>
                 <p className="text-sm font-medium text-blue-700 dark:text-blue-300">Receita Mensal</p>
                 <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">
-                  R$ {data?.reduce((sum, c) => sum + c.paymentValue, 0).toFixed(2) || '0,00'}
+                  R$ {clients?.reduce((sum, c) => sum + c.value, 0).toFixed(2) || '0,00'}
                 </p>
               </div>
               <div className="rounded-full bg-blue-500/20 p-3">
@@ -975,12 +1091,6 @@ export function ClientTable() {
                       Vencimento
                     </div>
                   </TableHead>
-                  <TableHead className="font-semibold">
-                    <div className="flex items-center gap-2">
-                      <Smartphone className="h-4 w-4" />
-                      Aplicativos
-                    </div>
-                  </TableHead>
                   <TableHead className="font-semibold text-right">Valor</TableHead>
                   <TableHead className="font-semibold text-center">Painel</TableHead>
                 </TableRow>
@@ -988,7 +1098,7 @@ export function ClientTable() {
               <TableBody>
                 {isLoading && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-12">
+                    <TableCell colSpan={6} className="text-center py-12">
                       <div className="flex flex-col items-center space-y-2">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                         <p className="text-muted-foreground">Carregando clientes...</p>
@@ -996,7 +1106,7 @@ export function ClientTable() {
                     </TableCell>
                   </TableRow>
                 )}
-                {data?.map((client) => (
+                {clients?.map((client) => (
                   <React.Fragment key={client.id}>
                     <TableRow className="hover:bg-muted/50 transition-colors">
                       <TableCell className="font-medium">
@@ -1021,7 +1131,7 @@ export function ClientTable() {
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
-                          {plans?.find(p => p.id === client.planId)?.name || client.planId}
+                          {plans?.find(p => p.id === client.plan_id)?.name || client.plan_id}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-center">
@@ -1034,97 +1144,46 @@ export function ClientTable() {
                       </TableCell>
                       <TableCell>
                         {(() => {
-                          const renewalDate = new Date(client.renewalDate);
+                          const renewal_date = new Date(client.renewal_date);
                           const today = new Date();
-                          const daysUntilRenewal = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                          const daysUntilRenewal = Math.ceil((renewal_date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
                           const isOverdue = daysUntilRenewal < 0;
                           const isUrgent = daysUntilRenewal >= 0 && daysUntilRenewal <= 3;
                           const isWarning = daysUntilRenewal > 3 && daysUntilRenewal <= 7;
 
-                          const [year, month, day] = client.renewalDate.split('-');
-                          const formattedDate = `${day}/${month}/${year}`;
-
                           return (
-                            <div className="flex items-center gap-2">
-                              <div className="text-sm font-medium text-foreground">
-                                {formattedDate}
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <div className="text-sm font-medium">
+                                  {(() => {
+                                    const [year, month, day] = client.renewal_date.split('-');
+                                    return `${day}/${month}/${year}`;
+                                  })()}
+                                </div>
+                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                                  isOverdue ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                  isUrgent ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                  isWarning ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                  'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                }`}>
+                                  {isOverdue ? `+${Math.abs(daysUntilRenewal)}d` :
+                                   daysUntilRenewal === 0 ? 'hoje' : 
+                                   `-${daysUntilRenewal}d`}
+                                </span>
                               </div>
-                              <div className="h-1 w-1 rounded-full bg-border"></div>
-                              {isOverdue ? (
-                                <Badge variant="destructive" className="text-xs px-2 py-0.5 font-medium">
-                                  {Math.abs(daysUntilRenewal)}d atraso
-                                </Badge>
-                              ) : isUrgent ? (
-                                <Badge className="text-xs px-2 py-0.5 bg-red-100 text-red-700 border-red-200 hover:bg-red-100 font-medium">
-                                  {daysUntilRenewal === 0 ? 'Hoje' : `${daysUntilRenewal}d`}
-                                </Badge>
-                              ) : isWarning ? (
-                                <Badge className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 border-yellow-200 hover:bg-yellow-100 font-medium">
-                                  {daysUntilRenewal}d
-                                </Badge>
-                              ) : (
-                                <Badge className="text-xs px-2 py-0.5 bg-green-100 text-green-700 border-green-200 hover:bg-green-100 font-medium">
-                                  {daysUntilRenewal}d
-                                </Badge>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          const clientApps = (client as any).apps || [];
-                          if (clientApps.length === 0) {
-                            return (
-                              <div className="text-xs text-muted-foreground italic">
-                                Nenhum app
-                              </div>
-                            );
-                          }
 
-                          const appNames = clientApps
-                            .map((appId: string) => apps?.find(a => a.id === appId)?.name)
-                            .filter(Boolean);
-
-                          if (appNames.length === 0) {
-                            return (
-                              <div className="text-xs text-muted-foreground italic">
-                                Nenhum app
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div className="flex flex-wrap gap-1">
-                              {appNames.slice(0, 2).map((name: string, index: number) => (
-                                <Badge
-                                  key={index}
-                                  variant="outline"
-                                  className="text-xs px-2 py-0.5 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950 dark:text-blue-300"
-                                >
-                                  {name}
-                                </Badge>
-                              ))}
-                              {appNames.length > 2 && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-xs px-2 py-0.5 bg-muted text-muted-foreground"
-                                >
-                                  +{appNames.length - 2}
-                                </Badge>
-                              )}
                             </div>
                           );
                         })()}
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="text-lg font-semibold text-green-600 dark:text-green-400">
-                          R$ {client.paymentValue.toFixed(2)}
+                          R$ {client.value.toFixed(2)}
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
                         <Badge variant="outline" className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200">
-                          {panels?.find(p => p.id === plans?.find(pl => pl.id === client.planId)?.panelId)?.name || 'N/A'}
+                          {panels?.find(p => p.id === plans?.find(pl => pl.id === client.plan_id)?.panel_id)?.name || 'N/A'}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -1132,7 +1191,7 @@ export function ClientTable() {
                     {/* Expanded Client Details */}
                     {expandedClient === client.id && (
                       <TableRow>
-                        <TableCell colSpan={7} className="p-0">
+                        <TableCell colSpan={6} className="p-0">
                           <div className="bg-muted/30 p-6 border-t border-border/50">
                             <div className="space-y-6">
                               {/* Informações de Acesso */}
@@ -1169,7 +1228,7 @@ export function ClientTable() {
                                     <p className="text-sm bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 p-3 rounded-lg border border-blue-200/50 dark:border-blue-800/50 text-blue-800 dark:text-blue-200 font-medium">
                                       {(() => {
                                         // Parse da data ISO sem problemas de fuso horário
-                                        const [year, month, day] = client.startDate.split('-');
+                                        const [year, month, day] = client.start_date.split('-');
                                         return `${day}/${month}/${year}`;
                                       })()}
                                     </p>
@@ -1179,7 +1238,7 @@ export function ClientTable() {
                                     <p className="text-sm bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 p-3 rounded-lg border border-green-200/50 dark:border-green-800/50 text-green-800 dark:text-green-200 font-medium">
                                       {(() => {
                                         // Parse da data ISO sem problemas de fuso horário
-                                        const [year, month, day] = client.renewalDate.split('-');
+                                        const [year, month, day] = client.renewal_date.split('-');
                                         return `${day}/${month}/${year}`;
                                       })()}
                                     </p>
@@ -1196,11 +1255,11 @@ export function ClientTable() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                   <div className="space-y-2">
                                     <Label className="text-sm font-medium text-muted-foreground">Valor de Desconto:</Label>
-                                    <p className="text-sm bg-background/50 p-3 rounded-lg border">R$ {(client as any).discountValue?.toFixed(2) || '0,00'}</p>
+                                    <p className="text-sm bg-background/50 p-3 rounded-lg border">R$ {(client as any).discount_value?.toFixed(2) || '0,00'}</p>
                                   </div>
                                   <div className="space-y-2">
                                     <Label className="text-sm font-medium text-muted-foreground">Valor Fixo:</Label>
-                                    <p className="text-sm bg-background/50 p-3 rounded-lg border">{(client as any).useFixedValue ? 'Sim' : 'Não'}</p>
+                                    <p className="text-sm bg-background/50 p-3 rounded-lg border">{(client as any).use_fixed_value ? 'Sim' : 'Não'}</p>
                                   </div>
                                 </div>
                               </div>
@@ -1256,6 +1315,10 @@ export function ClientTable() {
                                   <History className="mr-2 h-4 w-4" />
                                   Histórico de Pagamentos
                                 </Button>
+                                <WhatsAppSendButton
+                                  client={client}
+                                  type="custom"
+                                />
                               </div>
                             </div>
                           </div>
@@ -1264,7 +1327,7 @@ export function ClientTable() {
                     )}
                   </React.Fragment>
                 ))}
-                {!isLoading && (!data || data.length === 0) && (
+                {!isLoading && (!clients || clients.length === 0) && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center py-12">
                       <div className="flex flex-col items-center space-y-4">
@@ -1302,7 +1365,7 @@ export function ClientTable() {
           </Card>
         )}
 
-        {data?.map((client) => (
+        {clients?.map((client) => (
           <Card key={client.id} className="border-0 shadow-lg hover:shadow-xl transition-shadow duration-200">
             <CardContent className="p-4">
               <div className="space-y-4">
@@ -1316,11 +1379,11 @@ export function ClientTable() {
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold text-base truncate">{client.name}</h3>
                         {(() => {
-                          const clientPlan = plans?.find(p => p.id === client.planId);
-                          const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panelId) : null;
-                          const sigmaConnected = clientPanel?.sigmaConnected && client.username;
+                          const clientPlan = plans?.find(p => p.id === client.plan_id);
+                          const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panel_id) : null;
+                          const sigma_connected = clientPanel?.sigma_connected && client.username;
 
-                          if (sigmaConnected) {
+                          if (sigma_connected) {
                             return (
                               <div className="flex items-center gap-1">
                                 <Wifi className="h-3 w-3 text-green-500" />
@@ -1333,7 +1396,7 @@ export function ClientTable() {
                       </div>
                       <div className="flex flex-wrap gap-1 mt-1">
                         <Badge variant="secondary" className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs">
-                          {plans?.find(p => p.id === client.planId)?.name || client.planId}
+                          {plans?.find(p => p.id === client.plan_id)?.name || client.plan_id}
                         </Badge>
                       </div>
                     </div>
@@ -1356,49 +1419,37 @@ export function ClientTable() {
                           <CalendarIcon className="h-3 w-3" />
                           Vencimento
                         </p>
-                        <p className="text-sm font-medium">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">
+                            {(() => {
+                              const [year, month, day] = client.renewal_date.split('-');
+                              return `${day}/${month}/${year}`;
+                            })()}
+                          </p>
                           {(() => {
-                            const [year, month, day] = client.renewalDate.split('-');
-                            return `${day}/${month}/${year}`;
-                          })()}
-                        </p>
-                      </div>
-                      <div>
-                        {(() => {
-                          const renewalDate = new Date(client.renewalDate);
-                          const today = new Date();
-                          const daysUntilRenewal = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                          const isOverdue = daysUntilRenewal < 0;
-                          const isUrgent = daysUntilRenewal >= 0 && daysUntilRenewal <= 3;
-                          const isWarning = daysUntilRenewal > 3 && daysUntilRenewal <= 7;
+                            const renewal_date = new Date(client.renewal_date);
+                            const today = new Date();
+                            const daysUntilRenewal = Math.ceil((renewal_date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                            const isOverdue = daysUntilRenewal < 0;
+                            const isUrgent = daysUntilRenewal >= 0 && daysUntilRenewal <= 3;
+                            const isWarning = daysUntilRenewal > 3 && daysUntilRenewal <= 7;
 
-                          if (isOverdue) {
                             return (
-                              <Badge variant="destructive" className="text-xs px-2 py-1">
-                                {Math.abs(daysUntilRenewal)} dia{Math.abs(daysUntilRenewal) > 1 ? 's' : ''} em atraso
-                              </Badge>
+                              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${
+                                isOverdue ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                isUrgent ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                                isWarning ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                              }`}>
+                                {isOverdue ? `+${Math.abs(daysUntilRenewal)}d` :
+                                 daysUntilRenewal === 0 ? 'hoje' : 
+                                 `-${daysUntilRenewal}d`}
+                              </span>
                             );
-                          } else if (isUrgent) {
-                            return (
-                              <Badge variant="destructive" className="text-xs px-2 py-1 bg-red-100 text-red-800 border-red-200">
-                                {daysUntilRenewal === 0 ? 'Vence hoje' : `${daysUntilRenewal} dia${daysUntilRenewal > 1 ? 's' : ''}`}
-                              </Badge>
-                            );
-                          } else if (isWarning) {
-                            return (
-                              <Badge variant="outline" className="text-xs px-2 py-1 bg-yellow-100 text-yellow-800 border-yellow-200">
-                                {daysUntilRenewal} dias
-                              </Badge>
-                            );
-                          } else {
-                            return (
-                              <Badge variant="outline" className="text-xs px-2 py-1 bg-green-100 text-green-800 border-green-200">
-                                {daysUntilRenewal} dias
-                              </Badge>
-                            );
-                          }
-                        })()}
+                          })()}
+                        </div>
                       </div>
+
                     </div>
                   </div>
 
@@ -1410,14 +1461,14 @@ export function ClientTable() {
                         Valor
                       </p>
                       <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                        R$ {client.paymentValue.toFixed(2)}
+                        R$ {client.value.toFixed(2)}
                       </p>
                     </div>
 
                     <div className="bg-gradient-to-r from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 p-3 rounded-lg">
                       <p className="text-xs text-muted-foreground font-medium">Painel</p>
                       <p className="text-sm font-medium text-purple-700 dark:text-purple-300 truncate">
-                        {panels?.find(p => p.id === plans?.find(pl => pl.id === client.planId)?.panelId)?.name || 'N/A'}
+                        {panels?.find(p => p.id === plans?.find(pl => pl.id === client.plan_id)?.panel_id)?.name || 'N/A'}
                       </p>
                     </div>
                   </div>
@@ -1434,11 +1485,11 @@ export function ClientTable() {
                 {/* Ações - Botões em grid para mobile */}
                 <div className="pt-3 border-t border-border/50">
                   {(() => {
-                    const clientPlan = plans?.find(p => p.id === client.planId);
-                    const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panelId) : null;
-                    const sigmaConnected = clientPanel?.sigmaConnected;
+                    const clientPlan = plans?.find(p => p.id === client.plan_id);
+                    const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panel_id) : null;
+                    const sigma_connected = clientPanel?.sigma_connected;
                     const clientHasCredentials = client.username && client.password;
-                    const canCreateInSigma = sigmaConnected && clientHasCredentials && !client.username;
+                    const canCreateInSigma = sigma_connected && clientHasCredentials && !client.username;
 
                     return (
                       <div className={`grid gap-2 ${canCreateInSigma ? 'grid-cols-3' : 'grid-cols-2'}`}>
@@ -1494,11 +1545,11 @@ export function ClientTable() {
                           <DropdownMenuContent align="end">
                             {/* Sigma IPTV Actions */}
                             {(() => {
-                              const clientPlan = plans?.find(p => p.id === client.planId);
-                              const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panelId) : null;
-                              const sigmaConnected = clientPanel?.sigmaConnected;
+                              const clientPlan = plans?.find(p => p.id === client.plan_id);
+                              const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panel_id) : null;
+                              const sigma_connected = clientPanel?.sigma_connected;
 
-                              if (sigmaConnected && client.username) {
+                              if (sigma_connected && client.username) {
                                 return (
                                   <>
                                     <DropdownMenuItem
@@ -1546,7 +1597,7 @@ export function ClientTable() {
           </Card>
         ))}
 
-        {!isLoading && (!data || data.length === 0) && (
+        {!isLoading && (!clients || clients.length === 0) && (
           <Card className="border-0 shadow-lg">
             <CardContent className="p-8">
               <div className="flex flex-col items-center space-y-4 text-center">
@@ -1569,7 +1620,7 @@ export function ClientTable() {
 
       {/* Add Client Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader className="space-y-3">
             <div className="flex items-center space-x-3">
               <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
@@ -1625,7 +1676,7 @@ export function ClientTable() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Painel</Label>
-                  <Select value={selectedPanelId} onValueChange={(value) => { setSelectedPanelId(value); setSelectedPlanId(""); }}>
+                  <Select value={selectedPanelId} onValueChange={setSelectedPanelId}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
                       <SelectValue placeholder="Selecione um painel" />
                     </SelectTrigger>
@@ -1639,15 +1690,13 @@ export function ClientTable() {
 
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Plano</Label>
-                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={!selectedPanelId}>
+                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
-                      <SelectValue placeholder={selectedPanelId ? "Selecione um plano" : "Selecione um painel primeiro"} />
+                      <SelectValue placeholder="Selecione um plano" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(plans || []).filter(pl => pl.panelId === selectedPanelId).map(pl => (
-                        <SelectItem key={pl.id} value={pl.id}>
-                          {pl.name} - R$ {pl.saleValue.toFixed(2)}
-                        </SelectItem>
+                      {(plans || []).map(pl => (
+                        <SelectItem key={pl.id} value={pl.id}>{pl.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1703,7 +1752,7 @@ export function ClientTable() {
                   )}
                   {(() => {
                     const panelForAddPasswordCheck = panels?.find(p => p.id === selectedPanelId);
-                    if (panelForAddPasswordCheck?.sigmaConnected && clientPassword.length > 0) {
+                    if (panelForAddPasswordCheck?.sigma_connected && clientPassword.length > 0) {
                       const strengthInfo = getPasswordStrengthMessage(clientPassword);
                       return (
                         <p className={`text-sm mt-1 ${strengthInfo.color}`}>
@@ -1714,6 +1763,70 @@ export function ClientTable() {
                     return null;
                   })()}
                 </div>
+              </div>
+            </div>
+
+            {/* Payment Section */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Configuração de Pagamento</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-foreground">Data de Vencimento</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
+                        {dueDate ? format(dueDate, 'dd/MM/yyyy') : 'Escolha uma data'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar mode="single" selected={dueDate} onSelect={setDueDate} initialFocus locale={ptBR} />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-foreground">Valor de Desconto</Label>
+                  <Input
+                    type="number"
+                    value={discount_value}
+                    onChange={(e) => handleDiscountChange(e.target.value)}
+                    placeholder="0.00"
+                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Switch checked={use_fixed_value} onCheckedChange={setUseFixedValue} />
+                    <Label className="text-sm font-medium text-foreground">Usar valor fixo</Label>
+                  </div>
+                  {use_fixed_value && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-foreground">Valor Fixo</Label>
+                      <Input
+                        type="number"
+                        value={fixed_value}
+                        onChange={(e) => handleFixedValueChange(e.target.value)}
+                        placeholder="Valor personalizado"
+                        className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Observações</h3>
+              <div className="space-y-2">
+                <Label className="text-sm font-medium text-foreground">Observações Adicionais</Label>
+                <Textarea
+                  value={clientNotes}
+                  onChange={(e) => setClientNotes(e.target.value)}
+                  placeholder="Informações adicionais sobre o cliente..."
+                  className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors min-h-[80px] resize-none"
+                />
               </div>
             </div>
 
@@ -1877,72 +1990,6 @@ export function ClientTable() {
                 </div>
               )}
             </div>
-
-            {/* Payment Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Configuração de Pagamento</h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-foreground">Data de Vencimento</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
-                        {dueDate ? format(dueDate, 'dd/MM/yyyy') : 'Escolha uma data'}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar mode="single" selected={dueDate} onSelect={setDueDate} initialFocus locale={ptBR} />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-foreground">Valor de Desconto</Label>
-                  <Input
-                    type="number"
-                    value={discountValue}
-                    onChange={(e) => handleDiscountChange(e.target.value)}
-                    placeholder="0.00"
-                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center space-x-2">
-                    <Switch checked={useFixedValue} onCheckedChange={setUseFixedValue} />
-                    <Label className="text-sm font-medium text-foreground">Usar valor fixo</Label>
-                  </div>
-                  {useFixedValue && (
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium text-foreground">Valor Fixo</Label>
-                      <Input
-                        type="number"
-                        value={fixedValue}
-                        onChange={(e) => handleFixedValueChange(e.target.value)}
-                        placeholder="Valor personalizado"
-                        className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Notes Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Observações</h3>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-foreground">Observações Adicionais</Label>
-                <Textarea
-                  value={clientNotes}
-                  onChange={(e) => setClientNotes(e.target.value)}
-                  placeholder="Informações adicionais sobre o cliente..."
-                  className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors min-h-[80px] resize-none"
-                />
-              </div>
-            </div>
-
-
           </div>
 
           <DialogFooter className="flex flex-col sm:flex-row gap-3">
@@ -1966,7 +2013,7 @@ export function ClientTable() {
 
       {/* Edit Client Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={(o) => { setIsEditDialogOpen(o); if (!o) { resetForm(); setEditingClient(null); } }}>
-        <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
           <DialogHeader className="space-y-3">
             <div className="flex items-center space-x-3">
               <div className="h-10 w-10 rounded-full bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center">
@@ -2022,7 +2069,7 @@ export function ClientTable() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Painel</Label>
-                  <Select value={selectedPanelId} onValueChange={(value) => { setSelectedPanelId(value); setSelectedPlanId(""); }}>
+                  <Select value={selectedPanelId} onValueChange={setSelectedPanelId}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
                       <SelectValue placeholder="Selecione um painel" />
                     </SelectTrigger>
@@ -2036,15 +2083,13 @@ export function ClientTable() {
 
                 <div className="space-y-2">
                   <Label className="text-sm font-medium text-foreground">Plano</Label>
-                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={!selectedPanelId}>
+                  <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
                     <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
-                      <SelectValue placeholder={selectedPanelId ? "Selecione um plano" : "Selecione um painel primeiro"} />
+                      <SelectValue placeholder="Selecione um plano" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(plans || []).filter(pl => pl.panelId === selectedPanelId).map(pl => (
-                        <SelectItem key={pl.id} value={pl.id}>
-                          {pl.name} - R$ {pl.saleValue.toFixed(2)}
-                        </SelectItem>
+                      {(plans || []).map(pl => (
+                        <SelectItem key={pl.id} value={pl.id}>{pl.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -2100,7 +2145,7 @@ export function ClientTable() {
                   )}
                   {(() => {
                     const panelForEditPasswordCheck = panels?.find(p => p.id === selectedPanelId);
-                    if (panelForEditPasswordCheck?.sigmaConnected && clientPassword.length > 0) {
+                    if (panelForEditPasswordCheck?.sigma_connected && clientPassword.length > 0) {
                       const strengthInfo = getPasswordStrengthMessage(clientPassword);
                       return (
                         <p className={`text-sm mt-1 ${strengthInfo.color}`}>
@@ -2112,167 +2157,6 @@ export function ClientTable() {
                   })()}
                 </div>
               </div>
-            </div>
-
-            {/* Applications Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Aplicativos em Uso
-              </h3>
-
-              {apps && apps.length > 0 ? (
-                <div className="space-y-3">
-                  {/* Botão para expandir/colapsar */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsAppsExpanded(!isAppsExpanded)}
-                    className="w-full justify-between h-auto p-4 border-2 border-dashed hover:border-solid hover:bg-muted/50 transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                        <Smartphone className="h-5 w-5 text-white" />
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium">
-                          {selectedApps.length > 0
-                            ? `Cliente usa ${selectedApps.length} aplicativo${selectedApps.length !== 1 ? 's' : ''}`
-                            : 'Definir aplicativos do cliente'
-                          }
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {isAppsExpanded
-                            ? 'Clique para ocultar a lista'
-                            : `Selecione quais apps o cliente utiliza`
-                          }
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {selectedApps.length > 0 && (
-                        <div className="flex -space-x-1">
-                          {selectedApps.slice(0, 3).map((_, index) => (
-                            <div key={index} className="w-6 h-6 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center">
-                              <div className="w-2 h-2 bg-white rounded-full"></div>
-                            </div>
-                          ))}
-                          {selectedApps.length > 3 && (
-                            <div className="w-6 h-6 rounded-full bg-muted border-2 border-white flex items-center justify-center">
-                              <span className="text-xs font-medium">+{selectedApps.length - 3}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {isAppsExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </div>
-                  </Button>
-
-                  {/* Lista expandida */}
-                  {isAppsExpanded && (
-                    <div className="space-y-4">
-                      {/* Header com ações rápidas */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            checked={selectedApps.length === apps.length}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedApps(apps.map(app => app.id));
-                              } else {
-                                setSelectedApps([]);
-                              }
-                            }}
-                          />
-                          <span className="text-sm font-medium">
-                            {selectedApps.length === apps.length ? 'Desmarcar todos' : 'Selecionar todos'}
-                          </span>
-                        </div>
-                        {selectedApps.length > 0 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedApps([])}
-                            className="text-xs h-7"
-                          >
-                            Limpar seleção
-                          </Button>
-                        )}
-                      </div>
-
-                      {/* Grid de aplicativos */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {apps.map((app) => (
-                          <div
-                            key={app.id}
-                            className={`relative p-4 border-2 rounded-lg transition-all cursor-pointer hover:shadow-md ${selectedApps.includes(app.id)
-                              ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20'
-                              : 'border-border hover:border-blue-300'
-                              }`}
-                            onClick={() => {
-                              if (selectedApps.includes(app.id)) {
-                                setSelectedApps(selectedApps.filter(id => id !== app.id));
-                              } else {
-                                setSelectedApps([...selectedApps, app.id]);
-                              }
-                            }}
-                          >
-                            <div className="flex items-start gap-3">
-                              <Checkbox
-                                id={`edit-app-${app.id}`}
-                                checked={selectedApps.includes(app.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedApps([...selectedApps, app.id]);
-                                  } else {
-                                    setSelectedApps(selectedApps.filter(id => id !== app.id));
-                                  }
-                                }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium text-sm">{app.name}</div>
-                                {app.description && (
-                                  <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                    {app.description}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Indicador de seleção */}
-                            {selectedApps.includes(app.id) && (
-                              <div className="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
-                                <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Footer com resumo */}
-                      {selectedApps.length > 0 && (
-                        <div className="p-3 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                            <span className="text-sm text-blue-700 dark:text-blue-300">
-                              Cliente utiliza {selectedApps.length} aplicativo{selectedApps.length !== 1 ? 's' : ''} para assistir IPTV
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Smartphone className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Nenhum aplicativo cadastrado</p>
-                  <p className="text-xs mt-1">Cadastre aplicativos na seção "Aplicativos" para selecioná-los aqui</p>
-                </div>
-              )}
             </div>
 
             {/* Payment Section */}
@@ -2297,7 +2181,7 @@ export function ClientTable() {
                   <Label className="text-sm font-medium text-foreground">Valor de Desconto</Label>
                   <Input
                     type="number"
-                    value={discountValue}
+                    value={discount_value}
                     onChange={(e) => handleDiscountChange(e.target.value)}
                     placeholder="0.00"
                     className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
@@ -2306,15 +2190,15 @@ export function ClientTable() {
 
                 <div className="space-y-3">
                   <div className="flex items-center space-x-2">
-                    <Switch checked={useFixedValue} onCheckedChange={setUseFixedValue} />
+                    <Switch checked={use_fixed_value} onCheckedChange={setUseFixedValue} />
                     <Label className="text-sm font-medium text-foreground">Usar valor fixo</Label>
                   </div>
-                  {useFixedValue && (
+                  {use_fixed_value && (
                     <div className="space-y-2">
                       <Label className="text-sm font-medium text-foreground">Valor Fixo</Label>
                       <Input
                         type="number"
-                        value={fixedValue}
+                        value={fixed_value}
                         onChange={(e) => handleFixedValueChange(e.target.value)}
                         placeholder="Valor personalizado"
                         className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
@@ -2365,6 +2249,7 @@ export function ClientTable() {
           client={paymentHistoryClient}
           isOpen={isPaymentHistoryOpen}
           onClose={handleClosePaymentHistory}
+          onClientUpdate={handleClientUpdate}
         />
       )}
 
@@ -2411,10 +2296,69 @@ export function ClientTable() {
           <DialogHeader>
             <DialogTitle>Gerar Fatura</DialogTitle>
           </DialogHeader>
-          <div className="py-4">
+          <div className="py-4 space-y-3">
             <p className="text-sm text-muted-foreground">
               Deseja gerar uma fatura para <span className="font-semibold text-foreground">{nextPeriodToGenerate}</span>?
             </p>
+
+            {clientToGenerate && (() => {
+              const clientInvoices = invoices?.filter(invoice => invoice.client_id === clientToGenerate.id) || [];
+              const pendingInvoices = clientInvoices.filter(invoice => invoice.status === 'pending');
+
+              if (pendingInvoices.length > 0) {
+                return (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                      <span className="text-sm font-medium text-yellow-800">
+                        Faturas Pendentes Encontradas
+                      </span>
+                    </div>
+                    <p className="text-xs text-yellow-700">
+                      Este cliente possui {pendingInvoices.length} fatura(s) pendente(s).
+                      A nova fatura será gerada para o próximo mês.
+                    </p>
+                  </div>
+                );
+              }
+
+              const today = new Date();
+              const currentMonth = format(today, 'yyyy-MM');
+              const currentMonthInvoice = clientInvoices.find(invoice => {
+                const invoiceMonth = format(parseISO(invoice.due_date), 'yyyy-MM');
+                return invoiceMonth === currentMonth;
+              });
+
+              if (currentMonthInvoice) {
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-800">
+                        Mês Atual Já Faturado
+                      </span>
+                    </div>
+                    <p className="text-xs text-blue-700">
+                      O mês atual já possui fatura. A nova fatura será gerada para o próximo mês.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CheckCircle className="h-4 w-4 text-green-600" />
+                    <span className="text-sm font-medium text-green-800">
+                      Pronto para Faturar
+                    </span>
+                  </div>
+                  <p className="text-xs text-green-700">
+                    Nenhuma fatura pendente encontrada. A fatura será gerada para o mês atual.
+                  </p>
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter className="flex gap-2">
             <Button
@@ -2435,6 +2379,16 @@ export function ClientTable() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* WhatsApp Auto Notification */}
+      <WhatsAppAutoNotification
+        show={notification.show}
+        type={notification.type}
+        clientName={notification.clientName}
+        clientPhone={notification.clientPhone}
+        message={notification.message}
+        onClose={hideNotification}
+      />
     </div>
   );
 }

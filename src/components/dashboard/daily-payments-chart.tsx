@@ -118,7 +118,7 @@ export function DailyPaymentsChart({ invoices }: DailyPaymentsChartProps) {
           </p>
           <div className="space-y-1">
             <p className="text-emerald-400 font-bold text-lg">
-              R$ {payload[0].value.toFixed(2)}
+              R$ {(payload[0].value || 0).toFixed(2)}
             </p>
             <p className="text-slate-400 text-xs">
               {payload[0].payload.count} {payload[0].payload.count === 1 ? 'pagamento' : 'pagamentos'}

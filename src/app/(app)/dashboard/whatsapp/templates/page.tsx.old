@@ -1,0 +1,1660 @@
+"use client";
+
+import React, { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  FileText,
+  Plus,
+  Edit,
+  Trash2,
+  Copy,
+  Eye,
+  Save,
+  AlertTriangle,
+  CheckCircle,
+  MessageCircle,
+  DollarSign,
+  Clock,
+  AlertCircle,
+  Calendar,
+  Bell,
+  Settings,
+} from "lucide-react";
+import { useReminderTemplates } from "@/hooks/use-reminder-templates";
+import { useReminderSettings } from "@/hooks/use-reminder-settings";
+import { AVAILABLE_VARIABLES, MessageProcessor } from "@/lib/whatsapp-reminder-variables";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ReminderForceProcessor } from "@/components/whatsapp/reminder-force-processor";
+
+interface MessageTemplate {
+  id: string;
+  name: string;
+  type: 'billing' | 'reminder' | 'suspension' | 'welcome' | 'custom';
+  subject: string;
+  content: string;
+  variables: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+const defaultTemplates: MessageTemplate[] = [
+  {
+    id: '1',
+    name: 'Cobrança Padrão',
+    type: 'billing',
+    subject: 'Cobrança Mensal',
+    content: `🔔 *Cobrança {{BUSINESS_NAME}}*
+
+Olá *{{CLIENT_NAME}}*!
+
+Sua mensalidade está disponível:
+💰 Valor: R$ {{AMOUNT}}
+📅 Vencimento: {{DUE_DATE}}
+
+Para renovar seu acesso, entre em contato conosco.
+
+_Mensagem automática do sistema {{BUSINESS_NAME}}_`,
+    variables: ['CLIENT_NAME', 'AMOUNT', 'DUE_DATE', 'BUSINESS_NAME'],
+    createdAt: '2024-01-01',
+    updatedAt: '2024-01-01',
+  },
+  {
+    id: '2',
+    name: 'Lembrete de Vencimento',
+    type: 'reminder',
+    subject: 'Lembrete de Vencimento',
+    content: `⏰ *Lembrete de Vencimento*
+
+Olá *{{CLIENT_NAME}}*!
+
+Seu acesso vence em *{{DAYS_UNTIL_DUE}} dias*.
+
+Para evitar interrupções, renove seu plano em breve.
+
+_Mensagem automática do sistema {{BUSINESS_NAME}}_`,
+    variables: ['CLIENT_NAME', 'DAYS_UNTIL_DUE', 'BUSINESS_NAME'],
+    createdAt: '2024-01-01',
+    updatedAt: '2024-01-01',
+  },
+  {
+    id: '3',
+    name: 'Aviso de Suspensão',
+    type: 'suspension',
+    subject: 'Aviso de Suspensão',
+    content: `⚠️ *Aviso de Suspensão*
+
+Olá *{{CLIENT_NAME}}*!
+
+Seu acesso está em atraso e será suspenso em breve.
+
+Entre em contato para regularizar sua situação.
+
+_Mensagem automática do sistema {{BUSINESS_NAME}}_`,
+    variables: ['CLIENT_NAME', 'BUSINESS_NAME'],
+    createdAt: '2024-01-01',
+    updatedAt: '2024-01-01',
+  },
+  {
+    id: '4',
+    name: 'Boas-vindas',
+    type: 'welcome',
+    subject: 'Bem-vindo',
+    content: `🎉 *Bem-vindo ao {{BUSINESS_NAME}}*!
+
+Olá *{{CLIENT_NAME}}*!
+
+Seu acesso foi ativado com sucesso:
+📱 Usuário: {{USERNAME}}
+🔑 Senha: {{PASSWORD}}
+📅 Válido até: {{DUE_DATE}}
+
+Qualquer dúvida, estamos aqui para ajudar!
+
+_Equipe {{BUSINESS_NAME}}_`,
+    variables: ['CLIENT_NAME', 'USERNAME', 'PASSWORD', 'DUE_DATE', 'BUSINESS_NAME'],
+    createdAt: '2024-01-01',
+    updatedAt: '2024-01-01',
+  },
+];
+
+const typeIcons = {
+  billing: DollarSign,
+  reminder: Clock,
+  suspension: AlertCircle,
+  welcome: MessageCircle,
+  custom: FileText,
+};
+
+const typeColors = {
+  billing: 'bg-green-100 text-green-800 border-green-200',
+  reminder: 'bg-blue-100 text-blue-800 border-blue-200',
+  suspension: 'bg-red-100 text-red-800 border-red-200',
+  welcome: 'bg-purple-100 text-purple-800 border-purple-200',
+  custom: 'bg-gray-100 text-gray-800 border-gray-200',
+};
+
+const typeLabels = {
+  billing: 'Cobrança',
+  reminder: 'Lembrete',
+  suspension: 'Suspensão',
+  welcome: 'Boas-vindas',
+  custom: 'Personalizado',
+};
+
+export default function WhatsAppTemplatesPage() {
+  const [templates, setTemplates] = useState<MessageTemplate[]>(defaultTemplates);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<MessageTemplate | null>(null);
+  const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Reminder templates hooks
+  const {
+    templates: reminderTemplates,
+    isLoading: reminderLoading,
+    createTemplate: createReminderTemplate,
+    updateTemplate: updateReminderTemplate,
+    deleteTemplate: deleteReminderTemplate,
+    toggleTemplate: toggleReminderTemplate,
+    validateTemplate: validateReminderTemplate,
+    refresh: refreshReminderTemplates,
+  } = useReminderTemplates();
+
+  const {
+    settings: reminderSettings,
+    isLoading: settingsLoading,
+    updateSettings: updateReminderSettings,
+    toggleEnabled: toggleReminderSystem,
+    formatWorkingHours,
+    formatWorkingDays,
+    formatCheckInterval,
+  } = useReminderSettings();
+
+  // Reminder template form state
+  const [isCreateReminderDialogOpen, setIsCreateReminderDialogOpen] = useState(false);
+  const [isEditReminderDialogOpen, setIsEditReminderDialogOpen] = useState(false);
+  const [editingReminderTemplate, setEditingReminderTemplate] = useState<any>(null);
+  const [reminderFormData, setReminderFormData] = useState({
+    name: '',
+    message: '',
+    reminder_type: 'before' as 'before' | 'on_due' | 'after',
+    days_offset: 7,
+    is_active: true,
+    use_global_schedule: true,
+    send_hour: 9,
+    send_minute: 0,
+    working_days: [1, 2, 3, 4, 5, 6], // Seg-Sáb por padrão
+  });
+
+  // Form state
+  const [formData, setFormData] = useState({
+    name: '',
+    type: 'custom' as MessageTemplate['type'],
+    subject: '',
+    content: '',
+  });
+
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      type: 'custom',
+      subject: '',
+      content: '',
+    });
+  };
+
+  const resetReminderForm = () => {
+    setReminderFormData({
+      name: '',
+      message: '',
+      reminder_type: 'before',
+      days_offset: 7,
+      is_active: true,
+      use_global_schedule: true,
+      send_hour: 9,
+      send_minute: 0,
+      working_days: [1, 2, 3, 4, 5, 6],
+    });
+  };
+
+  // Reminder template functions
+  const handleCreateReminder = async () => {
+    // Validação básica sem verificação de duplicatas
+    const errors: string[] = [];
+    
+    if (!reminderFormData.name || reminderFormData.name.trim().length < 3) {
+      errors.push('Nome deve ter pelo menos 3 caracteres');
+    }
+    
+    if (!reminderFormData.message || reminderFormData.message.trim().length < 10) {
+      errors.push('Mensagem deve ter pelo menos 10 caracteres');
+    }
+    
+    if (errors.length > 0) {
+      setSaveResult({
+        success: false,
+        message: errors.join(', '),
+      });
+      return;
+    }
+
+    // Criar template (incluindo campos de agendamento se existirem)
+    const templateData = {
+      name: reminderFormData.name,
+      message: reminderFormData.message,
+      reminder_type: reminderFormData.reminder_type,
+      days_offset: reminderFormData.days_offset,
+      is_active: reminderFormData.is_active,
+      use_global_schedule: reminderFormData.use_global_schedule,
+      send_hour: reminderFormData.send_hour,
+      send_minute: reminderFormData.send_minute,
+    };
+
+    const result = await createReminderTemplate(templateData);
+    if (result.success) {
+      setIsCreateReminderDialogOpen(false);
+      resetReminderForm();
+      setSaveResult({
+        success: true,
+        message: 'Template de lembrete criado com sucesso!',
+      });
+      
+      // Refresh templates list silently (without page reload)
+      refreshReminderTemplates();
+    } else {
+      setSaveResult({
+        success: false,
+        message: result.error || 'Erro ao criar template',
+      });
+    }
+
+    setTimeout(() => setSaveResult(null), 3000);
+  };
+
+  const handleEditReminder = (template: any) => {
+    setEditingReminderTemplate(template);
+    
+    // Parse working_days se existir
+    let workingDays = [1, 2, 3, 4, 5, 6];
+    if (template.working_days) {
+      workingDays = template.working_days.split(',').map((d: string) => parseInt(d.trim()));
+    }
+    
+    setReminderFormData({
+      name: template.name,
+      message: template.message,
+      reminder_type: template.reminder_type,
+      days_offset: template.days_offset,
+      is_active: template.is_active,
+      use_global_schedule: template.use_global_schedule ?? true,
+      send_hour: template.send_hour ?? 9,
+      send_minute: template.send_minute ?? 0,
+      working_days: workingDays,
+    });
+    setIsEditReminderDialogOpen(true);
+  };
+
+  const handleUpdateReminder = async () => {
+    if (!editingReminderTemplate) return;
+
+    // Validação básica sem verificação de duplicatas
+    const errors: string[] = [];
+    
+    if (!reminderFormData.name || reminderFormData.name.trim().length < 3) {
+      errors.push('Nome deve ter pelo menos 3 caracteres');
+    }
+    
+    if (!reminderFormData.message || reminderFormData.message.trim().length < 10) {
+      errors.push('Mensagem deve ter pelo menos 10 caracteres');
+    }
+    
+    if (errors.length > 0) {
+      setSaveResult({
+        success: false,
+        message: errors.join(', '),
+      });
+      return;
+    }
+
+    // Atualizar template (incluindo campos de agendamento se existirem)
+    const templateData = {
+      name: reminderFormData.name,
+      message: reminderFormData.message,
+      reminder_type: reminderFormData.reminder_type,
+      days_offset: reminderFormData.days_offset,
+      is_active: reminderFormData.is_active,
+      use_global_schedule: reminderFormData.use_global_schedule,
+      send_hour: reminderFormData.send_hour,
+      send_minute: reminderFormData.send_minute,
+    };
+
+    const result = await updateReminderTemplate(editingReminderTemplate.id, templateData);
+    if (result.success) {
+      setIsEditReminderDialogOpen(false);
+      setEditingReminderTemplate(null);
+      resetReminderForm();
+      setSaveResult({
+        success: true,
+        message: 'Template de lembrete atualizado com sucesso!',
+      });
+      
+      // Refresh templates list silently (without page reload)
+      refreshReminderTemplates();
+    } else {
+      setSaveResult({
+        success: false,
+        message: result.error || 'Erro ao atualizar template',
+      });
+    }
+
+    setTimeout(() => setSaveResult(null), 3000);
+  };
+
+  const handleDeleteReminder = async (template: any) => {
+    if (window.confirm(`Tem certeza que deseja excluir o template "${template.name}"?`)) {
+      const result = await deleteReminderTemplate(template.id);
+      if (result.success) {
+        setSaveResult({
+          success: true,
+          message: 'Template de lembrete excluído com sucesso!',
+        });
+      } else {
+        setSaveResult({
+          success: false,
+          message: result.error || 'Erro ao excluir template',
+        });
+      }
+
+      setTimeout(() => setSaveResult(null), 3000);
+    }
+  };
+
+  const handleToggleReminder = async (template: any) => {
+    const result = await toggleReminderTemplate(template.id, !template.is_active);
+    if (result.success) {
+      setSaveResult({
+        success: true,
+        message: `Template ${template.is_active ? 'desativado' : 'ativado'} com sucesso!`,
+      });
+    } else {
+      setSaveResult({
+        success: false,
+        message: result.error || 'Erro ao alterar status do template',
+      });
+    }
+
+    setTimeout(() => setSaveResult(null), 3000);
+  };
+
+  const extractVariables = (content: string): string[] => {
+    const matches = content.match(/\{\{([^}]+)\}\}/g);
+    if (!matches) return [];
+    return [...new Set(matches.map(match => match.replace(/[{}]/g, '')))];
+  };
+
+  const handleCreate = () => {
+    if (!formData.name.trim() || !formData.content.trim()) {
+      setSaveResult({
+        success: false,
+        message: 'Nome e conteúdo são obrigatórios',
+      });
+      return;
+    }
+
+    const newTemplate: MessageTemplate = {
+      id: Date.now().toString(),
+      name: formData.name,
+      type: formData.type,
+      subject: formData.subject,
+      content: formData.content,
+      variables: extractVariables(formData.content),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTemplates(prev => [...prev, newTemplate]);
+    setIsCreateDialogOpen(false);
+    resetForm();
+    
+    setSaveResult({
+      success: true,
+      message: 'Template criado com sucesso!',
+    });
+
+    setTimeout(() => setSaveResult(null), 3000);
+  };
+
+  const handleEdit = (template: MessageTemplate) => {
+    setEditingTemplate(template);
+    setFormData({
+      name: template.name,
+      type: template.type,
+      subject: template.subject,
+      content: template.content,
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdate = () => {
+    if (!editingTemplate || !formData.name.trim() || !formData.content.trim()) {
+      setSaveResult({
+        success: false,
+        message: 'Nome e conteúdo são obrigatórios',
+      });
+      return;
+    }
+
+    const updatedTemplate: MessageTemplate = {
+      ...editingTemplate,
+      name: formData.name,
+      type: formData.type,
+      subject: formData.subject,
+      content: formData.content,
+      variables: extractVariables(formData.content),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? updatedTemplate : t));
+    setIsEditDialogOpen(false);
+    setEditingTemplate(null);
+    resetForm();
+    
+    setSaveResult({
+      success: true,
+      message: 'Template atualizado com sucesso!',
+    });
+
+    setTimeout(() => setSaveResult(null), 3000);
+  };
+
+  const handleDelete = (template: MessageTemplate) => {
+    if (window.confirm(`Tem certeza que deseja excluir o template "${template.name}"?`)) {
+      setTemplates(prev => prev.filter(t => t.id !== template.id));
+      
+      setSaveResult({
+        success: true,
+        message: 'Template excluído com sucesso!',
+      });
+
+      setTimeout(() => setSaveResult(null), 3000);
+    }
+  };
+
+  const handleDuplicate = (template: MessageTemplate) => {
+    const duplicatedTemplate: MessageTemplate = {
+      ...template,
+      id: Date.now().toString(),
+      name: `${template.name} (Cópia)`,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setTemplates(prev => [...prev, duplicatedTemplate]);
+    
+    setSaveResult({
+      success: true,
+      message: 'Template duplicado com sucesso!',
+    });
+
+    setTimeout(() => setSaveResult(null), 3000);
+  };
+
+  const handlePreview = (template: MessageTemplate) => {
+    setPreviewTemplate(template);
+    setIsPreviewDialogOpen(true);
+  };
+
+  const renderPreview = (template: MessageTemplate) => {
+    let preview = template.content;
+    
+    // Substituir variáveis por valores de exemplo
+    const exampleValues: Record<string, string> = {
+      CLIENT_NAME: 'João Silva',
+      AMOUNT: '50,00',
+      DUE_DATE: '31/01/2024',
+      DAYS_UNTIL_DUE: '3',
+      BUSINESS_NAME: 'GestPlay',
+      USERNAME: 'joao123',
+      PASSWORD: 'senha123',
+    };
+
+    template.variables.forEach(variable => {
+      const value = exampleValues[variable] || `[${variable}]`;
+      preview = preview.replace(new RegExp(`\\{\\{${variable}\\}\\}`, 'g'), value);
+    });
+
+    return preview;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="space-y-2">
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+            Templates WhatsApp
+          </h1>
+          <p className="text-muted-foreground">
+            Gerencie templates de mensagens e lembretes automáticos
+          </p>
+        </div>
+        
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              Novo Template
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Criar Novo Template</DialogTitle>
+              <DialogDescription>
+                Crie um template personalizado para suas mensagens
+              </DialogDescription>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Nome do Template</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                    placeholder="Ex: Cobrança Personalizada"
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="type">Tipo</Label>
+                  <select
+                    id="type"
+                    value={formData.type}
+                    onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value as MessageTemplate['type'] }))}
+                    className="w-full p-2 border rounded-md"
+                  >
+                    <option value="custom">Personalizado</option>
+                    <option value="billing">Cobrança</option>
+                    <option value="reminder">Lembrete</option>
+                    <option value="suspension">Suspensão</option>
+                    <option value="welcome">Boas-vindas</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="subject">Assunto (Opcional)</Label>
+                <Input
+                  id="subject"
+                  value={formData.subject}
+                  onChange={(e) => setFormData(prev => ({ ...prev, subject: e.target.value }))}
+                  placeholder="Assunto da mensagem"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="content">Conteúdo da Mensagem</Label>
+                <Textarea
+                  id="content"
+                  value={formData.content}
+                  onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                  placeholder="Digite o conteúdo da mensagem..."
+                  rows={8}
+                  className="resize-none"
+                />
+                <p className="text-sm text-muted-foreground">
+                  Use variáveis como: {`{{CLIENT_NAME}}`}, {`{{AMOUNT}}`}, {`{{DUE_DATE}}`}
+                </p>
+              </div>
+              
+              {formData.content && (
+                <div className="space-y-2">
+                  <Label>Variáveis Detectadas</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {extractVariables(formData.content).map(variable => (
+                      <Badge key={variable} variant="outline">
+                        {variable}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreate}>
+                <Save className="h-4 w-4 mr-2" />
+                Criar Template
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* Resultado das ações */}
+      {saveResult && (
+        <Alert variant={saveResult.success ? "default" : "destructive"}>
+          {saveResult.success ? (
+            <CheckCircle className="h-4 w-4" />
+          ) : (
+            <AlertTriangle className="h-4 w-4" />
+          )}
+          <AlertDescription>{saveResult.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {/* Tabs */}
+      <Tabs defaultValue="templates" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="templates" className="flex items-center gap-2">
+            <MessageCircle className="h-4 w-4" />
+            Templates Manuais
+          </TabsTrigger>
+          <TabsTrigger value="reminders" className="flex items-center gap-2">
+            <Bell className="h-4 w-4" />
+            Lembretes Automáticos
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Templates Manuais */}
+        <TabsContent value="templates" className="space-y-6">
+          {/* Lista de Templates */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {templates.map((template) => {
+          const Icon = typeIcons[template.type];
+          
+          return (
+            <Card key={template.id} className="hover:shadow-lg transition-shadow">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-5 w-5 text-muted-foreground" />
+                    <CardTitle className="text-lg">{template.name}</CardTitle>
+                  </div>
+                  <Badge className={typeColors[template.type]}>
+                    {typeLabels[template.type]}
+                  </Badge>
+                </div>
+                {template.subject && (
+                  <CardDescription>{template.subject}</CardDescription>
+                )}
+              </CardHeader>
+              
+              <CardContent className="space-y-4">
+                <div className="text-sm text-muted-foreground line-clamp-3">
+                  {template.content.substring(0, 100)}...
+                </div>
+                
+                {template.variables.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">Variáveis:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {template.variables.slice(0, 3).map(variable => (
+                        <Badge key={variable} variant="outline" className="text-xs">
+                          {variable}
+                        </Badge>
+                      ))}
+                      {template.variables.length > 3 && (
+                        <Badge variant="outline" className="text-xs">
+                          +{template.variables.length - 3}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="flex justify-between pt-2 border-t">
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handlePreview(template)}
+                      className="h-8 w-8 p-0"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleEdit(template)}
+                      className="h-8 w-8 p-0"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleDuplicate(template)}
+                      className="h-8 w-8 p-0"
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDelete(template)}
+                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          );
+        })}
+          </div>
+        </TabsContent>
+
+        {/* Lembretes Automáticos */}
+        <TabsContent value="reminders" className="space-y-6">
+          {/* Header dos Lembretes */}
+          <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <h2 className="text-xl font-semibold">Lembretes Automáticos</h2>
+              <p className="text-sm text-muted-foreground">
+                Configure lembretes que serão enviados automaticamente baseados na data de vencimento
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              {/* Toggle do Sistema */}
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={reminderSettings?.is_enabled || false}
+                  onCheckedChange={(checked) => toggleReminderSystem(checked)}
+                  disabled={settingsLoading}
+                />
+                <span className="text-sm font-medium">
+                  Sistema {reminderSettings?.is_enabled ? 'Ativo' : 'Inativo'}
+                </span>
+              </div>
+
+              {/* Botão Configurações */}
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Settings className="h-4 w-4" />
+                    Configurações
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Configurações de Horário</DialogTitle>
+                    <DialogDescription>
+                      Configure quando os lembretes devem ser enviados
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Horário de Funcionamento</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <Label htmlFor="start-hour" className="text-xs">Início</Label>
+                          <Select
+                            value={reminderSettings?.start_hour?.toString() || '8'}
+                            onValueChange={(value) => {
+                              updateReminderSettings({
+                                start_hour: parseInt(value),
+                                end_hour: reminderSettings?.end_hour || 18
+                              });
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Array.from({ length: 24 }, (_, i) => (
+                                <SelectItem key={i} value={i.toString()}>
+                                  {i.toString().padStart(2, '0')}:00
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="end-hour" className="text-xs">Fim</Label>
+                          <Select
+                            value={reminderSettings?.end_hour?.toString() || '18'}
+                            onValueChange={(value) => {
+                              updateReminderSettings({
+                                start_hour: reminderSettings?.start_hour || 8,
+                                end_hour: parseInt(value)
+                              });
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Array.from({ length: 24 }, (_, i) => (
+                                <SelectItem key={i} value={i.toString()}>
+                                  {i.toString().padStart(2, '0')}:00
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Lembretes serão enviados apenas neste horário
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Dias da Semana</Label>
+                      <div className="grid grid-cols-7 gap-1">
+                        {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((day, index) => {
+                          const dayValue = index === 0 ? 7 : index; // Convert Sunday from 0 to 7
+                          const isSelected = reminderSettings?.working_days_array?.includes(dayValue) || false;
+                          
+                          return (
+                            <Button
+                              key={day}
+                              variant={isSelected ? "default" : "outline"}
+                              size="sm"
+                              className="h-8 w-8 p-0 text-xs"
+                              onClick={() => {
+                                const currentDays = reminderSettings?.working_days_array || [1,2,3,4,5,6];
+                                const newDays = isSelected 
+                                  ? currentDays.filter(d => d !== dayValue)
+                                  : [...currentDays, dayValue].sort();
+                                
+                                updateReminderSettings({
+                                  working_days: newDays.join(',')
+                                });
+                              }}
+                            >
+                              {day}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Selecione os dias para envio de lembretes
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Intervalo de Verificação</Label>
+                      <Select
+                        value={reminderSettings?.check_interval_minutes?.toString() || '60'}
+                        onValueChange={(value) => {
+                          updateReminderSettings({
+                            check_interval_minutes: parseInt(value)
+                          });
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="15">15 minutos</SelectItem>
+                          <SelectItem value="30">30 minutos</SelectItem>
+                          <SelectItem value="60">1 hora</SelectItem>
+                          <SelectItem value="120">2 horas</SelectItem>
+                          <SelectItem value="180">3 horas</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Frequência de verificação de novos lembretes
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Limite Diário</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="1000"
+                        value={reminderSettings?.max_daily_reminders || 100}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 100;
+                          updateReminderSettings({
+                            max_daily_reminders: value
+                          });
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Máximo de lembretes por dia
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => {}}>
+                      Fechar
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              
+              {/* Botão Criar Lembrete */}
+              <Dialog open={isCreateReminderDialogOpen} onOpenChange={setIsCreateReminderDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Novo Lembrete
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Criar Lembrete Automático</DialogTitle>
+                    <DialogDescription>
+                      Configure um lembrete que será enviado automaticamente
+                    </DialogDescription>
+                  </DialogHeader>
+                  
+                  <div className="space-y-4 pr-2">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="reminder-name">Nome do Lembrete</Label>
+                        <Input
+                          id="reminder-name"
+                          value={reminderFormData.name}
+                          onChange={(e) => setReminderFormData(prev => ({ ...prev, name: e.target.value }))}
+                          placeholder="Ex: Lembrete 7 dias antes"
+                        />
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="reminder-type">Tipo de Lembrete</Label>
+                        <Select
+                          value={reminderFormData.reminder_type}
+                          onValueChange={(value: 'before' | 'on_due' | 'after') => {
+                            setReminderFormData(prev => ({ 
+                              ...prev, 
+                              reminder_type: value,
+                              days_offset: value === 'before' ? 7 : value === 'on_due' ? 0 : -2
+                            }));
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="before">Antes do vencimento</SelectItem>
+                            <SelectItem value="on_due">No dia do vencimento</SelectItem>
+                            <SelectItem value="after">Após o vencimento</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="days-offset">
+                        {reminderFormData.reminder_type === 'before' && 'Dias antes do vencimento'}
+                        {reminderFormData.reminder_type === 'on_due' && 'No dia do vencimento'}
+                        {reminderFormData.reminder_type === 'after' && 'Dias após o vencimento'}
+                      </Label>
+                      {reminderFormData.reminder_type !== 'on_due' && (
+                        <Input
+                          id="days-offset"
+                          type="number"
+                          min={1}
+                          max={30}
+                          value={Math.abs(reminderFormData.days_offset)}
+                          onChange={(e) => {
+                            const days = parseInt(e.target.value) || 1;
+                            setReminderFormData(prev => ({ 
+                              ...prev, 
+                              days_offset: prev.reminder_type === 'before' ? days : -days
+                            }));
+                          }}
+                          placeholder="Número de dias"
+                        />
+                      )}
+                      {reminderFormData.reminder_type === 'on_due' && (
+                        <p className="text-sm text-muted-foreground">
+                          O lembrete será enviado exatamente no dia do vencimento
+                        </p>
+                      )}
+                    </div>
+                    
+                    {/* Configuração de Horário */}
+                    <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <Label className="text-base font-medium">Agendamento</Label>
+                          <p className="text-sm text-muted-foreground">
+                            Configure quando este lembrete deve ser enviado
+                          </p>
+                        </div>
+                        <Switch
+                          checked={reminderFormData.use_global_schedule}
+                          onCheckedChange={(checked) => 
+                            setReminderFormData(prev => ({ ...prev, use_global_schedule: checked }))
+                          }
+                        />
+                      </div>
+                      
+                      <div className="text-sm">
+                        {reminderFormData.use_global_schedule ? (
+                          <div className="text-green-700 bg-green-50 p-3 rounded border border-green-200">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Clock className="h-4 w-4" />
+                              <span className="font-medium">Usando Horário Global</span>
+                            </div>
+                            <p>Este lembrete seguirá as configurações globais de horário ({formatWorkingHours() || '8:00 às 18:00'})</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="text-blue-700 bg-blue-50 p-3 rounded border border-blue-200">
+                              <div className="flex items-center gap-2 mb-1">
+                                <Bell className="h-4 w-4" />
+                                <span className="font-medium">Horário Específico</span>
+                              </div>
+                              <p>Configure um horário específico para este lembrete</p>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label htmlFor="send-hour">Hora</Label>
+                                <Input
+                                  id="send-hour"
+                                  type="number"
+                                  min="0"
+                                  max="23"
+                                  value={reminderFormData.send_hour}
+                                  onChange={(e) => {
+                                    const hour = Math.max(0, Math.min(23, parseInt(e.target.value) || 0));
+                                    setReminderFormData(prev => ({ ...prev, send_hour: hour }));
+                                  }}
+                                  placeholder="HH"
+                                  className="text-center font-mono"
+                                />
+                                <p className="text-xs text-muted-foreground">0-23</p>
+                              </div>
+                              
+                              <div className="space-y-2">
+                                <Label htmlFor="send-minute">Minuto</Label>
+                                <Input
+                                  id="send-minute"
+                                  type="number"
+                                  min="0"
+                                  max="59"
+                                  value={reminderFormData.send_minute}
+                                  onChange={(e) => {
+                                    const minute = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                                    setReminderFormData(prev => ({ ...prev, send_minute: minute }));
+                                  }}
+                                  placeholder="MM"
+                                  className="text-center font-mono"
+                                />
+                                <p className="text-xs text-muted-foreground">0-59</p>
+                              </div>
+                            </div>
+                            
+                            <div className="text-xs text-muted-foreground bg-yellow-50 p-2 rounded border border-yellow-200">
+                              <strong>Horário configurado:</strong> {reminderFormData.send_hour.toString().padStart(2, '0')}:{reminderFormData.send_minute.toString().padStart(2, '0')}
+                              <br />
+                              <strong>Dias da semana:</strong> Seguirá a configuração global ({formatWorkingDays() || 'Seg-Sáb'})
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="reminder-message">Mensagem do Lembrete</Label>
+                      <Textarea
+                        id="reminder-message"
+                        value={reminderFormData.message}
+                        onChange={(e) => setReminderFormData(prev => ({ ...prev, message: e.target.value }))}
+                        placeholder="Digite a mensagem do lembrete..."
+                        rows={6}
+                        className="resize-none"
+                      />
+                      <div className="text-sm">
+                        <Label className="mb-2 block">Variáveis disponíveis (clique para inserir):</Label>
+                        <div className="grid grid-cols-2 gap-2 p-3 bg-gray-50 rounded-lg border max-h-32 overflow-y-auto">
+                          {AVAILABLE_VARIABLES.map(variable => (
+                            <Badge 
+                              key={variable.key} 
+                              variant="outline" 
+                              className="text-xs cursor-pointer hover:bg-blue-50 hover:border-blue-300 justify-start"
+                              onClick={() => {
+                                const textarea = document.getElementById('reminder-message') as HTMLTextAreaElement;
+                                if (textarea) {
+                                  const start = textarea.selectionStart;
+                                  const end = textarea.selectionEnd;
+                                  const text = textarea.value;
+                                  const before = text.substring(0, start);
+                                  const after = text.substring(end);
+                                  const newText = before + `{{${variable.key}}}` + after;
+                                  setReminderFormData(prev => ({ ...prev, message: newText }));
+                                  setTimeout(() => {
+                                    textarea.focus();
+                                    textarea.setSelectionRange(start + variable.key.length + 4, start + variable.key.length + 4);
+                                  }, 0);
+                                }
+                              }}
+                              title={variable.description}
+                            >
+                              <span className="font-mono">{`{{${variable.key}}}`}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          💡 Clique em uma variável para inseri-la na mensagem
+                        </p>
+                      </div>
+                    </div>
+                    
+                    {reminderFormData.message && (
+                      <div className="space-y-2">
+                        <Label>Preview da Mensagem</Label>
+                        <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-sm">
+                          <div className="whitespace-pre-line">
+                            {MessageProcessor.generatePreview(reminderFormData.message)}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsCreateReminderDialogOpen(false)}>
+                      Cancelar
+                    </Button>
+                    <Button onClick={handleCreateReminder}>
+                      <Save className="h-4 w-4 mr-2" />
+                      Criar Lembrete
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+
+          {/* Lista de Lembretes */}
+          {reminderLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Carregando lembretes...</p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {reminderTemplates.map((template) => (
+                <Card key={template.id} className="hover:shadow-lg transition-shadow">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Bell className="h-5 w-5 text-muted-foreground" />
+                        <CardTitle className="text-lg">{template.name}</CardTitle>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge 
+                          className={
+                            template.reminder_type === 'before' ? 'bg-blue-100 text-blue-800' :
+                            template.reminder_type === 'on_due' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-800'
+                          }
+                        >
+                          {template.reminder_type === 'before' && `${template.days_offset}d antes`}
+                          {template.reminder_type === 'on_due' && 'No vencimento'}
+                          {template.reminder_type === 'after' && `${Math.abs(template.days_offset)}d depois`}
+                        </Badge>
+                        <Switch
+                          checked={template.is_active}
+                          onCheckedChange={() => handleToggleReminder(template)}
+                        />
+                      </div>
+                    </div>
+                  </CardHeader>
+                  
+                  <CardContent className="space-y-4">
+                    <div className="text-sm text-muted-foreground line-clamp-3">
+                      {template.message.substring(0, 100)}...
+                    </div>
+                    
+                    {/* Informações de Agendamento */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3" />
+                        <span className="font-medium">Agendamento:</span>
+                      </div>
+                      {(template.use_global_schedule ?? true) ? (
+                        <div className="text-xs text-green-700 bg-green-50 px-3 py-2 rounded-md border border-green-200">
+                          <div className="flex items-center gap-1">
+                            <Settings className="h-3 w-3" />
+                            <span className="font-medium">Horário Global</span>
+                          </div>
+                          <div className="text-green-600 mt-1">
+                            {formatWorkingHours() || '8:00 às 18:00'}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-blue-700 bg-blue-50 px-3 py-2 rounded-md border border-blue-200">
+                          <div className="flex items-center gap-1">
+                            <Bell className="h-3 w-3" />
+                            <span className="font-medium">Horário Específico</span>
+                          </div>
+                          <div className="text-blue-600 mt-1 font-mono text-sm">
+                            {(template.send_hour ?? 9).toString().padStart(2, '0')}:{(template.send_minute ?? 0).toString().padStart(2, '0')}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="flex justify-between pt-2 border-t">
+                      <div className="flex gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setPreviewTemplate({
+                              ...template,
+                              content: template.message,
+                              variables: [],
+                              type: 'reminder' as any,
+                              subject: '',
+                              createdAt: template.created_at,
+                              updatedAt: template.updated_at,
+                            });
+                            setIsPreviewDialogOpen(true);
+                          }}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEditReminder(template)}
+                          className="h-8 w-8 p-0"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleDeleteReminder(template)}
+                        className="h-8 w-8 p-0 text-red-600 hover:text-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+              
+              {reminderTemplates.length === 0 && (
+                <div className="col-span-full text-center py-12">
+                  <Bell className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Nenhum lembrete configurado</h3>
+                  <p className="text-muted-foreground mb-4">
+                    Crie seu primeiro lembrete automático para começar
+                  </p>
+                  <Button onClick={() => setIsCreateReminderDialogOpen(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Criar Primeiro Lembrete
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Dialog de Edição */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar Template</DialogTitle>
+            <DialogDescription>
+              Edite as informações do template
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-name">Nome do Template</Label>
+                <Input
+                  id="edit-name"
+                  value={formData.name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-type">Tipo</Label>
+                <select
+                  id="edit-type"
+                  value={formData.type}
+                  onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value as MessageTemplate['type'] }))}
+                  className="w-full p-2 border rounded-md"
+                >
+                  <option value="custom">Personalizado</option>
+                  <option value="billing">Cobrança</option>
+                  <option value="reminder">Lembrete</option>
+                  <option value="suspension">Suspensão</option>
+                  <option value="welcome">Boas-vindas</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-subject">Assunto (Opcional)</Label>
+              <Input
+                id="edit-subject"
+                value={formData.subject}
+                onChange={(e) => setFormData(prev => ({ ...prev, subject: e.target.value }))}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-content">Conteúdo da Mensagem</Label>
+              <Textarea
+                id="edit-content"
+                value={formData.content}
+                onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                rows={8}
+                className="resize-none"
+              />
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleUpdate}>
+              <Save className="h-4 w-4 mr-2" />
+              Salvar Alterações
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Edição de Lembrete */}
+      <Dialog open={isEditReminderDialogOpen} onOpenChange={setIsEditReminderDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Editar Lembrete Automático</DialogTitle>
+            <DialogDescription>
+              Edite as configurações do lembrete
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 pr-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-reminder-name">Nome do Lembrete</Label>
+                <Input
+                  id="edit-reminder-name"
+                  value={reminderFormData.name}
+                  onChange={(e) => setReminderFormData(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="edit-reminder-type">Tipo de Lembrete</Label>
+                <Select
+                  value={reminderFormData.reminder_type}
+                  onValueChange={(value: 'before' | 'on_due' | 'after') => {
+                    setReminderFormData(prev => ({ 
+                      ...prev, 
+                      reminder_type: value,
+                      days_offset: value === 'before' ? Math.abs(prev.days_offset) : 
+                                   value === 'on_due' ? 0 : 
+                                   -Math.abs(prev.days_offset)
+                    }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="before">Antes do vencimento</SelectItem>
+                    <SelectItem value="on_due">No dia do vencimento</SelectItem>
+                    <SelectItem value="after">Após o vencimento</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-days-offset">
+                {reminderFormData.reminder_type === 'before' && 'Dias antes do vencimento'}
+                {reminderFormData.reminder_type === 'on_due' && 'No dia do vencimento'}
+                {reminderFormData.reminder_type === 'after' && 'Dias após o vencimento'}
+              </Label>
+              {reminderFormData.reminder_type !== 'on_due' && (
+                <Input
+                  id="edit-days-offset"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={Math.abs(reminderFormData.days_offset)}
+                  onChange={(e) => {
+                    const days = parseInt(e.target.value) || 1;
+                    setReminderFormData(prev => ({ 
+                      ...prev, 
+                      days_offset: prev.reminder_type === 'before' ? days : -days
+                    }));
+                  }}
+                />
+              )}
+            </div>
+            
+            {/* Configuração de Horário - Edição */}
+            <div className="space-y-4 p-4 border rounded-lg bg-gray-50">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <Label className="text-base font-medium">Agendamento</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Configure quando este lembrete deve ser enviado
+                  </p>
+                </div>
+                <Switch
+                  checked={reminderFormData.use_global_schedule}
+                  onCheckedChange={(checked) => 
+                    setReminderFormData(prev => ({ ...prev, use_global_schedule: checked }))
+                  }
+                />
+              </div>
+              
+              <div className="text-sm">
+                {reminderFormData.use_global_schedule ? (
+                  <div className="text-green-700 bg-green-50 p-3 rounded border border-green-200">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Clock className="h-4 w-4" />
+                      <span className="font-medium">Usando Horário Global</span>
+                    </div>
+                    <p>Este lembrete seguirá as configurações globais de horário ({formatWorkingHours() || '8:00 às 18:00'})</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-blue-700 bg-blue-50 p-3 rounded border border-blue-200">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Bell className="h-4 w-4" />
+                        <span className="font-medium">Horário Específico</span>
+                      </div>
+                      <p>Configure um horário específico para este lembrete</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-send-hour">Hora</Label>
+                        <Input
+                          id="edit-send-hour"
+                          type="number"
+                          min="0"
+                          max="23"
+                          value={reminderFormData.send_hour}
+                          onChange={(e) => {
+                            const hour = Math.max(0, Math.min(23, parseInt(e.target.value) || 0));
+                            setReminderFormData(prev => ({ ...prev, send_hour: hour }));
+                          }}
+                          placeholder="HH"
+                          className="text-center font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">0-23</p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-send-minute">Minuto</Label>
+                        <Input
+                          id="edit-send-minute"
+                          type="number"
+                          min="0"
+                          max="59"
+                          value={reminderFormData.send_minute}
+                          onChange={(e) => {
+                            const minute = Math.max(0, Math.min(59, parseInt(e.target.value) || 0));
+                            setReminderFormData(prev => ({ ...prev, send_minute: minute }));
+                          }}
+                          placeholder="MM"
+                          className="text-center font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">0-59</p>
+                      </div>
+                    </div>
+                    
+                    <div className="text-xs text-muted-foreground bg-yellow-50 p-2 rounded border border-yellow-200">
+                      <strong>Horário configurado:</strong> {reminderFormData.send_hour.toString().padStart(2, '0')}:{reminderFormData.send_minute.toString().padStart(2, '0')}
+                      <br />
+                      <strong>Dias da semana:</strong> Seguirá a configuração global ({formatWorkingDays() || 'Seg-Sáb'})
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="edit-reminder-message">Mensagem do Lembrete</Label>
+              <Textarea
+                id="edit-reminder-message"
+                value={reminderFormData.message}
+                onChange={(e) => setReminderFormData(prev => ({ ...prev, message: e.target.value }))}
+                rows={6}
+                className="resize-none"
+              />
+              <div className="text-sm">
+                <Label className="mb-2 block">Variáveis disponíveis (clique para inserir):</Label>
+                <div className="grid grid-cols-2 gap-2 p-3 bg-gray-50 rounded-lg border max-h-32 overflow-y-auto">
+                  {AVAILABLE_VARIABLES.map(variable => (
+                    <Badge 
+                      key={variable.key} 
+                      variant="outline" 
+                      className="text-xs cursor-pointer hover:bg-blue-50 hover:border-blue-300 justify-start"
+                      onClick={() => {
+                        const textarea = document.getElementById('edit-reminder-message') as HTMLTextAreaElement;
+                        if (textarea) {
+                          const start = textarea.selectionStart;
+                          const end = textarea.selectionEnd;
+                          const text = textarea.value;
+                          const before = text.substring(0, start);
+                          const after = text.substring(end);
+                          const newText = before + `{{${variable.key}}}` + after;
+                          setReminderFormData(prev => ({ ...prev, message: newText }));
+                          setTimeout(() => {
+                            textarea.focus();
+                            textarea.setSelectionRange(start + variable.key.length + 4, start + variable.key.length + 4);
+                          }, 0);
+                        }
+                      }}
+                      title={variable.description}
+                    >
+                      <span className="font-mono">{`{{${variable.key}}}`}</span>
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  💡 Clique em uma variável para inseri-la na mensagem
+                </p>
+              </div>
+              {reminderFormData.message && (
+                <div className="space-y-2 mt-3">
+                  <Label>Preview da Mensagem</Label>
+                  <div className="p-3 bg-green-50 rounded-lg border border-green-200 text-sm">
+                    <div className="whitespace-pre-line">
+                      {MessageProcessor.generatePreview(reminderFormData.message)}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditReminderDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleUpdateReminder}>
+              <Save className="h-4 w-4 mr-2" />
+              Salvar Alterações
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Preview */}
+      <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Preview do Template</DialogTitle>
+            <DialogDescription>
+              Como a mensagem aparecerá para o cliente
+            </DialogDescription>
+          </DialogHeader>
+          
+          {previewTemplate && (
+            <div className="space-y-4">
+              <div className="p-4 bg-green-50 rounded-lg border border-green-200">
+                <div className="whitespace-pre-line text-sm">
+                  {renderPreview(previewTemplate)}
+                </div>
+              </div>
+              
+              <div className="text-xs text-muted-foreground">
+                * Os valores mostrados são apenas exemplos
+              </div>
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button onClick={() => setIsPreviewDialogOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

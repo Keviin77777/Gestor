@@ -8,6 +8,14 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path((?!whatsapp).*)*',
+        destination: 'http://localhost:8080/:path*',
+      },
+    ];
+  },
   images: {
     remotePatterns: [
       {

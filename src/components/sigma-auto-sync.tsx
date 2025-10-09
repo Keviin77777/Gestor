@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect } from 'react';
-import { useFirebase, useMemoFirebase } from '@/firebase';
-import { useCollection } from '@/firebase/firestore/use-collection';
-import { collection } from 'firebase/firestore';
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
+// Removed Firebase Firestore imports;
 import { useSigmaIntegration } from '@/hooks/use-sigma-integration';
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
 
 interface SigmaAutoSyncProps {
   enabled?: boolean;
@@ -12,29 +15,15 @@ interface SigmaAutoSyncProps {
 }
 
 export function SigmaAutoSync({ enabled = true, intervalMinutes = 30 }: SigmaAutoSyncProps) {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user } = useMySQL();
+  const resellerId = user?.id;
   const sigmaIntegration = useSigmaIntegration();
 
   // Collections
-  const clientsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'clients');
-  }, [firestore, resellerId]);
 
-  const plansCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'plans');
-  }, [firestore, resellerId]);
-
-  const panelsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'panels');
-  }, [firestore, resellerId]);
-
-  const { data: clients } = useCollection(clientsCollection);
-  const { data: plans } = useCollection(plansCollection);
-  const { data: panels } = useCollection(panelsCollection);
+  const { data: clients, isLoading: clientsLoading } = useClients();
+  const { data: plans, isLoading: plansLoading } = usePlans();
+  const { data: panels, isLoading: panelsLoading } = usePanels();
 
   useEffect(() => {
     if (!enabled || !clients || !plans || !panels || !resellerId) {
@@ -52,17 +41,16 @@ export function SigmaAutoSync({ enabled = true, intervalMinutes = 30 }: SigmaAut
         if (!client.username) continue;
 
         // Find client's panel
-        const clientPlan = plans.find((p: any) => p.id === client.planId);
+        const clientPlan = plans.find((p: any) => p.id === client.plan_id);
         if (!clientPlan) continue;
 
-        const clientPanel = panels.find((p: any) => p.id === clientPlan.panelId);
-        if (!clientPanel?.sigmaConnected) continue;
+        const clientPanel = panels.find((p: any) => p.id === clientPlan.panel_id);
+        if (!clientPanel?.sigma_connected) continue;
 
         try {
           const result = await sigmaIntegration.syncFromSigma(
             client,
             clientPanel,
-            firestore,
             resellerId
           );
 

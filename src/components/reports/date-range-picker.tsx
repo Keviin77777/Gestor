@@ -15,13 +15,33 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 
+interface CalendarDateRangePickerProps extends React.HTMLAttributes<HTMLDivElement> {
+  date?: { from: Date; to: Date };
+  onDateChange?: (date: { from: Date; to: Date }) => void;
+}
+
 export function CalendarDateRangePicker({
   className,
-}: React.HTMLAttributes<HTMLDivElement>) {
-  const [date, setDate] = React.useState<DateRange | undefined>({
+  date: externalDate,
+  onDateChange,
+}: CalendarDateRangePickerProps) {
+  const [internalDate, setInternalDate] = React.useState<DateRange | undefined>({
     from: new Date(2024, 0, 1),
     to: new Date(),
-  })
+  });
+
+  const date = externalDate ? { from: externalDate.from, to: externalDate.to } : internalDate;
+
+  const handleDateChange = (newDate: DateRange | undefined) => {
+    if (newDate?.from && newDate?.to) {
+      const dateRange = { from: newDate.from, to: newDate.to };
+      if (onDateChange) {
+        onDateChange(dateRange);
+      } else {
+        setInternalDate(newDate);
+      }
+    }
+  };
 
   return (
     <div className={cn("grid gap-2", className)}>
@@ -56,7 +76,7 @@ export function CalendarDateRangePicker({
             mode="range"
             defaultMonth={date?.from}
             selected={date}
-            onSelect={setDate}
+            onSelect={handleDateChange}
             numberOfMonths={2}
             locale={ptBR}
           />

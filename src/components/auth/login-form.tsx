@@ -1,3 +1,8 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,7 +15,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { FileText } from 'lucide-react';
+import { FileText, Loader2 } from 'lucide-react';
+import { useMySQL } from '@/lib/mysql-provider';
+import { useToast } from '@/hooks/use-toast';
 
 function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
     return (
@@ -42,40 +49,118 @@ function GoogleIcon(props: React.SVGProps<SVGSVGElement>) {
   }
 
 export function LoginForm() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const { login } = useMySQL();
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!email || !password) {
+      toast({
+        title: 'Erro',
+        description: 'Por favor, preencha email e senha',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      await login(email, password);
+      toast({
+        title: 'Sucesso!',
+        description: 'Login realizado com sucesso',
+      });
+      router.push('/dashboard');
+    } catch (error) {
+      console.error('Login error:', error);
+      toast({
+        title: 'Erro no login',
+        description: error instanceof Error ? error.message : 'Credenciais inválidas',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <Card className="w-full max-w-sm">
-      <CardHeader className="text-center">
-        <div className="flex justify-center items-center gap-2 mb-2">
-            <div className="bg-primary p-2 rounded-lg">
-                <FileText className="text-primary-foreground size-7" />
-            </div>
-        </div>
-        <CardTitle className="text-2xl font-headline">Bem-vindo!</CardTitle>
-        <CardDescription>
-          Acesse sua conta para gerenciar sua revenda.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        <div className="grid gap-2">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" placeholder="seu@email.com" required />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="password">Senha</Label>
-          <Input id="password" type="password" required />
-        </div>
-      </CardContent>
-      <CardFooter className="flex flex-col gap-4">
-        <Button className="w-full">Entrar</Button>
-        <div className="relative w-full">
-            <Separator />
-            <span className="absolute left-1/2 -translate-x-1/2 -top-2.5 bg-card px-2 text-xs text-muted-foreground">OU</span>
-        </div>
-        <Button variant="outline" className="w-full">
-            <GoogleIcon className="mr-2 h-4 w-4" />
-            Entrar com Google
-        </Button>
-      </CardFooter>
+      <form onSubmit={handleSubmit}>
+        <CardHeader className="text-center">
+          <div className="flex justify-center items-center gap-2 mb-2">
+              <div className="bg-primary p-2 rounded-lg">
+                  <FileText className="text-primary-foreground size-7" />
+              </div>
+          </div>
+          <CardTitle className="text-2xl font-headline">Bem-vindo!</CardTitle>
+          <CardDescription>
+            Acesse sua conta para gerenciar sua revenda.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-2">
+            <Label htmlFor="email">Email</Label>
+            <Input 
+              id="email" 
+              type="email" 
+              placeholder="admin@admin.com" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={isLoading}
+              required 
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="password">Senha</Label>
+            <Input 
+              id="password" 
+              type="password" 
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={isLoading}
+              required 
+            />
+          </div>
+        </CardContent>
+        <CardFooter className="flex flex-col gap-4">
+          <Button type="submit" className="w-full" disabled={isLoading}>
+            {isLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Entrando...
+              </>
+            ) : (
+              'Entrar'
+            )}
+          </Button>
+          
+          <div className="text-center text-sm text-muted-foreground">
+            Não tem uma conta?{' '}
+            <Link 
+              href="/register" 
+              className="text-primary hover:underline font-medium"
+            >
+              Criar conta
+            </Link>
+          </div>
+
+          <div className="relative w-full">
+              <Separator />
+              <span className="absolute left-1/2 -translate-x-1/2 -top-2.5 bg-card px-2 text-xs text-muted-foreground">OU</span>
+          </div>
+          <Button variant="outline" className="w-full" type="button" disabled>
+              <GoogleIcon className="mr-2 h-4 w-4" />
+              Entrar com Google
+          </Button>
+        </CardFooter>
+      </form>
     </Card>
   );
 }

@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { format, differenceInDays, parseISO, isAfter } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useEffect, useState } from 'react';
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection } from "firebase/firestore";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
+// Removed Firebase Firestore imports;
 import type { Client } from "@/lib/definitions";
+import { useClients } from '@/hooks/use-clients';
 
 interface Notification {
     id: string;
@@ -26,9 +27,9 @@ function generateNotifications(clients: Client[]): Notification[] {
     const today = new Date();
 
     clients?.forEach((client) => {
-        if (!client.renewalDate) return;
+        if (!client.renewal_date) return;
 
-        const renewalDate = parseISO(client.renewalDate);
+        const renewalDate = parseISO(client.renewal_date);
         const daysUntilRenewal = differenceInDays(renewalDate, today);
         const isOverdue = isAfter(today, renewalDate);
 
@@ -80,16 +81,10 @@ function generateNotifications(clients: Client[]): Notification[] {
 }
 
 export function SmartNotifications() {
-    const { firestore, user } = useFirebase();
-    const resellerId = user?.uid;
-
+    const { user } = useMySQL();
     // Collections
-    const clientsCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'clients');
-    }, [firestore, resellerId]);
 
-    const { data: clients } = useCollection<Client>(clientsCollection);
+    const { data: clients, isLoading: clientsLoading } = useClients();
     const [loading, setLoading] = useState(true);
     const [notifications, setNotifications] = useState<Notification[]>([]);
 

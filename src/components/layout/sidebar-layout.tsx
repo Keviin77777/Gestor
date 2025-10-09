@@ -19,6 +19,7 @@ import {
   List,
   Plus,
   Smartphone,
+  MessageCircle,
 } from 'lucide-react';
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import SigmaAutoSync from "@/components/sigma-auto-sync";
@@ -46,6 +47,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { WhatsAppStatusBadge } from '@/components/whatsapp/whatsapp-status-indicator';
 
 interface NavItem {
   href: string;
@@ -116,20 +120,99 @@ const navItems: NavItem[] = [
     icon: AreaChart, 
     label: 'Relatórios',
     description: 'Análises e insights',
-    badge: null
+    badge: null,
+    submenu: [
+      {
+        href: '/dashboard/reports',
+        label: 'Visão Geral',
+        description: 'Overview financeiro'
+      },
+      {
+        href: '/dashboard/reports/clients',
+        label: 'Clientes',
+        description: 'Análise de clientes'
+      },
+      {
+        href: '/dashboard/reports/financial',
+        label: 'Financeiro Avançado',
+        description: 'Métricas financeiras'
+      },
+      {
+        href: '/dashboard/reports/defaulters',
+        label: 'Inadimplência',
+        description: 'Clientes inadimplentes'
+      },
+      {
+        href: '/dashboard/reports/plans',
+        label: 'Planos',
+        description: 'Rentabilidade por plano'
+      },
+      {
+        href: '/dashboard/reports/expenses',
+        label: 'Despesas Detalhadas',
+        description: 'Análise de despesas'
+      },
+      {
+        href: '/dashboard/reports/comparative',
+        label: 'Comparativo',
+        description: 'Comparação entre períodos'
+      }
+    ]
+  },
+  { 
+    href: '/dashboard/whatsapp', 
+    icon: MessageCircle, 
+    label: 'WhatsApp',
+    description: 'Pareamento e automação',
+    badge: null,
+    submenu: [
+      {
+        href: '/dashboard/whatsapp',
+        label: 'Conexão',
+        description: 'Pareamento e status'
+      },
+      {
+        href: '/dashboard/whatsapp/templates',
+        label: 'Templates',
+        description: 'Criar e gerenciar templates'
+      },
+      {
+        href: '/dashboard/whatsapp/settings',
+        label: 'Configurações',
+        description: 'Intervalos e segurança'
+      }
+    ]
   },
 ];
 
 export function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [expandedMenus, setExpandedMenus] = React.useState<string[]>([]);
+  const [expandedMenus, setExpandedMenus] = React.useState<string[]>(() => {
+    // Auto-expand submenu if we're on a clients page
+    if (pathname.startsWith('/dashboard/clients')) {
+      return ['Clientes'];
+    }
+    return [];
+  });
+
+  // Update expanded menus when pathname changes
+  React.useEffect(() => {
+    if (pathname.startsWith('/dashboard/clients')) {
+      setExpandedMenus(prev => 
+        prev.includes('Clientes') ? prev : [...prev, 'Clientes']
+      );
+    }
+  }, [pathname]);
 
   const toggleSubmenu = (label: string) => {
-    setExpandedMenus(prev => 
-      prev.includes(label) 
+    console.log('Toggling submenu for:', label);
+    setExpandedMenus(prev => {
+      const newState = prev.includes(label) 
         ? prev.filter(item => item !== label)
-        : [...prev, label]
-    );
+        : [...prev, label];
+      console.log('New expanded menus:', newState);
+      return newState;
+    });
   };
 
   return (
@@ -411,6 +494,9 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
             </Button>
             
             <ThemeToggle />
+            
+            {/* WhatsApp Status Indicator */}
+            <WhatsAppStatusBadge />
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

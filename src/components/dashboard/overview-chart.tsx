@@ -2,21 +2,16 @@
 
 import React from "react";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts"
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection } from "firebase/firestore";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
+// Removed Firebase Firestore imports;
 import type { Client } from "@/lib/definitions";
+import { useClients } from '@/hooks/use-clients';
 
 export function OverviewChart() {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user } = useMySQL();
 
-  const clientsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'clients');
-  }, [firestore, resellerId]);
-
-  const { data: clients } = useCollection<Client>(clientsCollection);
+  const { data: clients, isLoading: clientsLoading } = useClients();
 
   // Generate last 12 months data
   const generateMonthlyData = () => {
@@ -34,9 +29,9 @@ export function OverviewChart() {
       
       // Calculate revenue for this month
       const monthRevenue = clients?.filter(client => {
-        const clientDate = new Date(client.startDate);
+        const clientDate = new Date(client.start_date);
         return clientDate.getMonth() === month && clientDate.getFullYear() === year;
-      }).reduce((sum, client) => sum + client.paymentValue, 0) || 0;
+      }).reduce((sum, client) => sum + client.value, 0) || 0;
 
       months.push({
         month: monthNames[month],
@@ -79,7 +74,7 @@ export function OverviewChart() {
             }
             return value;
           }}
-          formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Receita']}
+          formatter={(value: number) => [`R$ ${(value || 0).toFixed(2)}`, 'Receita']}
         />
         <Bar dataKey="profit" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
       </BarChart>

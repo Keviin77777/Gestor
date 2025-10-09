@@ -16,46 +16,37 @@ import { ExpiringClients } from "@/components/dashboard/expiring-clients";
 import { DailyClientsChart } from "@/components/dashboard/daily-clients-chart";
 import { DailyPaymentsChart } from "@/components/dashboard/daily-payments-chart";
 import { TopServersChart } from "@/components/dashboard/top-servers-chart";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection } from "firebase/firestore";
-import type { Client, Expense, Panel, Plan, Invoice } from "@/lib/definitions";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
+// Removed Firebase Firestore imports;
+import type { Invoice } from "@/lib/definitions";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
 
 export default function DashboardPage() {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user, isLoading: userLoading } = useMySQL();
+  
+  // Only fetch data if user is authenticated
+  const { data: clients } = useClients();
+  const { data: panels } = usePanels();
+  const { data: plans } = usePlans();
 
-  // Collections
-  const clientsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'clients');
-  }, [firestore, resellerId]);
+  // Show loading if user is not loaded yet
+  if (userLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">Carregando dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
-  const expensesCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'expenses');
-  }, [firestore, resellerId]);
-
-  const panelsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'panels');
-  }, [firestore, resellerId]);
-
-  const plansCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'plans');
-  }, [firestore, resellerId]);
-
-  const invoicesCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'invoices');
-  }, [firestore, resellerId]);
-
-  const { data: clients } = useCollection<Client>(clientsCollection);
-  const { data: expenses } = useCollection<Expense>(expensesCollection);
-  const { data: panels } = useCollection<Panel>(panelsCollection);
-  const { data: plans } = useCollection<Plan>(plansCollection);
-  const { data: invoices } = useCollection<Invoice>(invoicesCollection);
+  // TODO: Create hooks for expenses and invoices
+  const expenses: any[] = [];
+  const invoices: Invoice[] = [];
 
   // Calculate automatic panel expenses
   const panelExpenses = useMemo(() => {
@@ -63,20 +54,16 @@ export default function DashboardPage() {
 
     return panels.reduce((total, panel) => {
       // Find plans for this panel
-      const panelPlans = plans.filter(plan => plan.panelId === panel.id);
+      const panelPlans = plans.filter(plan => plan.panel_id === panel.id);
 
       // Find active clients using plans from this panel
       const activeClientsInPanel = clients.filter(client =>
         client.status === 'active' &&
-        panelPlans.some(plan => plan.id === client.planId)
+        panelPlans.some(plan => plan.id === client.plan_id)
       );
 
-      let cost = 0;
-      if (panel.costType === 'fixed' && panel.monthlyCost) {
-        cost = panel.monthlyCost;
-      } else if (panel.costType === 'perActive' && panel.costPerActive) {
-        cost = panel.costPerActive * activeClientsInPanel.length;
-      }
+      // Use monthly_cost from panel
+      const cost = Number(panel.monthly_cost) || 0;
 
       return total + cost;
     }, 0);
@@ -88,7 +75,7 @@ export default function DashboardPage() {
   const today = new Date();
 
   // 1. Receita Bruta (Total potential revenue - all clients)
-  const totalGrossRevenue = clients?.reduce((sum, client) => sum + client.paymentValue, 0) || 0;
+  const totalGrossRevenue = clients?.reduce((sum, client) => sum + (client.value || 0), 0) || 0;
 
   // 2. Saldo Líquido Mensal (Monthly paid invoices)
   const monthlyPaidRevenue = useMemo(() => {
@@ -124,20 +111,20 @@ export default function DashboardPage() {
     if (!clients) return { count: 0, value: 0 };
 
     const overdue = clients.filter(client => {
-      const renewalDate = new Date(client.renewalDate);
+      const renewalDate = new Date(client.renewal_date);
       return renewalDate < today && client.status === 'active';
     });
 
     return {
       count: overdue.length,
-      value: overdue.reduce((sum, client) => sum + client.paymentValue, 0)
+      value: overdue.reduce((sum, client) => sum + (client.value || 0), 0)
     };
   }, [clients, today]);
 
   // Other stats
   const activeClients = clients?.filter(client => client.status === 'active').length || 0;
-  const registeredExpenses = expenses?.reduce((sum, expense) => sum + expense.value, 0) || 0;
-  const totalExpenses = registeredExpenses + panelExpenses;
+  const registeredExpenses = expenses?.reduce((sum, expense) => sum + (parseFloat(expense.value) || 0), 0) || 0;
+  const totalExpenses = (registeredExpenses || 0) + (panelExpenses || 0);
 
   // Net revenue calculation (Gross Revenue - Total Expenses)
   const netRevenue = totalGrossRevenue - totalExpenses;
@@ -147,12 +134,12 @@ export default function DashboardPage() {
   const currentYearForGrowth = new Date().getFullYear();
 
   const currentMonthClients = clients?.filter(client => {
-    const clientDate = new Date(client.startDate);
+    const clientDate = new Date(client.start_date);
     return clientDate.getMonth() === currentMonthForGrowth && clientDate.getFullYear() === currentYearForGrowth;
   }).length || 0;
 
   const previousMonthClients = clients?.filter(client => {
-    const clientDate = new Date(client.startDate);
+    const clientDate = new Date(client.start_date);
     const prevMonth = currentMonthForGrowth === 0 ? 11 : currentMonthForGrowth - 1;
     const prevYear = currentMonthForGrowth === 0 ? currentYearForGrowth - 1 : currentYearForGrowth;
     return clientDate.getMonth() === prevMonth && clientDate.getFullYear() === prevYear;
@@ -206,7 +193,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-3xl font-headline font-bold text-blue-900 dark:text-blue-100">
-              R$ {totalGrossRevenue.toFixed(2)}
+              R$ {(totalGrossRevenue || 0).toFixed(2)}
             </div>
             <div className="flex items-center space-x-2 text-sm">
               <div className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
@@ -238,7 +225,7 @@ export default function DashboardPage() {
             <div className="flex items-center space-x-2 text-sm">
               <div className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
                 <ArrowUpRight className="h-4 w-4" />
-                <span className="font-medium">{clientGrowth > 0 ? `+${clientGrowth.toFixed(1)}%` : '0%'}</span>
+                <span className="font-medium">{(clientGrowth || 0) > 0 ? `+${(clientGrowth || 0).toFixed(1)}%` : '0%'}</span>
               </div>
               <span className="text-slate-500 dark:text-slate-400">vs mês anterior</span>
             </div>
@@ -260,16 +247,16 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-3xl font-headline font-bold text-amber-900 dark:text-amber-100">
-              R$ {totalExpenses.toFixed(2)}
+              R$ {(totalExpenses || 0).toFixed(2)}
             </div>
             <div className="space-y-1">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-amber-600/70 dark:text-amber-400/70">Registradas:</span>
-                <span className="font-medium text-amber-800 dark:text-amber-200">R$ {registeredExpenses.toFixed(2)}</span>
+                <span className="font-medium text-amber-800 dark:text-amber-200">R$ {(registeredExpenses || 0).toFixed(2)}</span>
               </div>
               <div className="flex items-center justify-between text-xs">
                 <span className="text-amber-600/70 dark:text-amber-400/70">Painéis:</span>
-                <span className="font-medium text-amber-800 dark:text-amber-200">R$ {panelExpenses.toFixed(2)}</span>
+                <span className="font-medium text-amber-800 dark:text-amber-200">R$ {(panelExpenses || 0).toFixed(2)}</span>
               </div>
             </div>
           </CardContent>
@@ -290,7 +277,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-3xl font-headline font-bold text-violet-900 dark:text-violet-100">
-              R$ {netRevenue.toFixed(2)}
+              R$ {(netRevenue || 0).toFixed(2)}
             </div>
             <div className="flex items-center space-x-2 text-sm">
               <div className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
@@ -321,7 +308,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-3xl font-headline font-bold text-green-900 dark:text-green-100">
-              R$ {monthlyPaidRevenue.toFixed(2)}
+              R$ {(monthlyPaidRevenue || 0).toFixed(2)}
             </div>
             <div className="flex items-center space-x-2 text-sm">
               <div className="flex items-center space-x-1 text-emerald-600 dark:text-emerald-400">
@@ -349,7 +336,7 @@ export default function DashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="text-3xl font-headline font-bold text-cyan-900 dark:text-cyan-100">
-              R$ {annualPaidRevenue.toFixed(2)}
+              R$ {(annualPaidRevenue || 0).toFixed(2)}
             </div>
             <div className="flex items-center space-x-2 text-sm">
               <div className="flex items-center space-x-1 text-blue-600 dark:text-blue-400">
@@ -382,7 +369,7 @@ export default function DashboardPage() {
             <div className="flex items-center space-x-2 text-sm">
               <div className="flex items-center space-x-1 text-red-600 dark:text-red-400">
                 <ArrowDownRight className="h-4 w-4" />
-                <span className="font-medium">R$ {overdueClients.value.toFixed(2)}</span>
+                <span className="font-medium">R$ {(overdueClients.value || 0).toFixed(2)}</span>
               </div>
               <span className="text-slate-500 dark:text-slate-400">em atraso</span>
             </div>
@@ -458,7 +445,6 @@ export default function DashboardPage() {
           <RecentClients />
         </CardContent>
       </Card>
-
 
     </div>
   );

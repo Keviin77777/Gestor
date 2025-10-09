@@ -1,0 +1,98 @@
+# ============================================================================
+# .gitignore for MySQL Migration
+# IMPORTANT: Protects sensitive data and credentials
+# ============================================================================
+
+# Environment variables (NEVER COMMIT!)
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Database credentials and exports
+serviceAccountKey.json
+firebase-export-*.json
+exports/
+*.sql
+*.sql.gz
+
+# Storage and logs
+storage/
+storage/logs/
+storage/backups/
+storage/rate_limits/
+
+# MySQL dumps
+*.dump
+*.backup
+
+# PHP
+vendor/
+composer.lock
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.cache
+
+# Security
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Backup files
+*.bak
+*.old
+*~
+
+# Test files
+test-data/
+*.test.json
+
+# Documentation builds
+docs/_build/
+
+# ============================================================================
+# WHITELIST (files to keep)
+# ============================================================================
+
+# Keep example files
+!.env.example
+!database/schema.sql
+
+# Keep documentation
+!*.md
+!README.md
+
+# Keep scripts
+!scripts/*.sh
+!scripts/*.ps1
+!scripts/*.php
+!scripts/*.js
+!scripts/package.json

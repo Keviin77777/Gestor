@@ -70,8 +70,8 @@ export class SigmaAPI {
           }
           
           // Check for specific error messages
-          if (errorText.includes('Invalid Token')) {
-            throw new Error('Invalid Token');
+          if (errorText.includes('Invalid Token') || errorText.includes('invalid_token')) {
+            throw new Error('Token inválido ou expirado. Verifique se o token está correto e ainda é válido.');
           }
           
           throw new Error(`Sigma API Error: ${response.status} - ${response.statusText}`);

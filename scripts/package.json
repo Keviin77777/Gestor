@@ -1,0 +1,33 @@
+{
+  "name": "iptv-manager-migration-scripts",
+  "version": "1.0.0",
+  "description": "Scripts for migrating from Firebase to MySQL and WhatsApp integration",
+  "scripts": {
+    "export": "node export-firebase.js",
+    "export:stats": "node export-firebase.js stats",
+    "import": "php import-to-mysql.php",
+    "whatsapp-server": "node whatsapp-server.js",
+    "whatsapp-monitor": "node monitor-whatsapp.js",
+    "whatsapp-start": "npm run whatsapp-monitor",
+    "reminders": "node reminder-processor.js",
+    "reminders:dev": "nodemon reminder-processor.js",
+    "invoices": "node invoice-processor.js",
+    "invoices:dev": "nodemon invoice-processor.js",
+    "start:all": "concurrently \"npm run whatsapp-server\" \"npm run reminders\" \"npm run invoices\"",
+    "dev:all": "concurrently \"nodemon whatsapp-server.js\" \"nodemon reminder-processor.js\" \"nodemon invoice-processor.js\""
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0",
+    "mysql2": "^3.15.2",
+    "node-fetch": "^2.7.0",
+    "pino": "^8.17.2",
+    "qrcode": "^1.5.3"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "private": true
+}

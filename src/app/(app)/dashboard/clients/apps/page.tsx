@@ -35,23 +35,44 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import Link from "next/link";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection, doc } from "firebase/firestore";
-import { addDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase/non-blocking-updates";
+import { useMySQL } from '@/lib/mysql-provider';
+import { mysqlApi } from '@/lib/mysql-api-client';
 import type { App } from "@/lib/definitions";
 
 export default function AppsPage() {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user } = useMySQL();
+  const resellerId = user?.id;
+
+  // Show loading state if user is not authenticated
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-400">Carregando...</p>
+        </div>
+      </div>
+    );
+  }
 
   // Collections
-  const appsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'apps');
-  }, [firestore, resellerId]);
 
-  const { data: apps, isLoading: appsLoading } = useCollection<App>(appsCollection);
+  const [apps, setApps] = React.useState<any[]>([]);
+  const [isLoading, setIsLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    const load = async () => {
+      if (!resellerId) return;
+      setIsLoading(true);
+      try {
+        const data = await mysqlApi.getApps();
+        setApps(data);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, [resellerId]);
 
   // View states
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
@@ -72,14 +93,14 @@ export default function AppsPage() {
   // Filtered apps
   const filteredApps = useMemo(() => {
     if (!apps) return [];
-    return apps.filter(app => 
+    return apps.filter((app: any) => 
       app.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (app.description && app.description.toLowerCase().includes(searchTerm.toLowerCase()))
     );
   }, [apps, searchTerm]);
 
-  const handleAddApp = () => {
-    if (!appsCollection || !resellerId) {
+  const handleAddApp = async () => {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -88,18 +109,11 @@ export default function AppsPage() {
       return;
     }
 
-    const newApp: any = {
-      resellerId,
-      name: appName.trim(),
-      createdAt: new Date().toISOString(),
-    };
-
-    // Só adiciona descrição se não estiver vazia
-    if (appDescription.trim()) {
-      newApp.description = appDescription.trim();
-    }
-
-    addDocumentNonBlocking(appsCollection, newApp);
+    const payload = { name: appName.trim(), description: appDescription.trim() || undefined };
+    const created = await mysqlApi.createApp(payload);
+    // Garantir que descrição esteja presente no objeto local
+    const normalized = { ...created, description: created.description ?? created.notes ?? payload.description };
+    setApps(prev => [normalized, ...prev]);
     resetForm();
     setIsAddDialogOpen(false);
   };
@@ -111,8 +125,8 @@ export default function AppsPage() {
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdateApp = () => {
-    if (!editingApp || !appsCollection || !resellerId) {
+  const handleUpdateApp = async () => {
+    if (!resellerId) {
       alert('Erro: dados não encontrados.');
       return;
     }
@@ -130,15 +144,16 @@ export default function AppsPage() {
       updatedApp.description = appDescription.trim();
     }
 
-    const appRef = doc(firestore, 'resellers', resellerId, 'apps', editingApp.id);
-    updateDocumentNonBlocking(appRef, updatedApp);
+    if (!editingApp) return;
+    await mysqlApi.updateApp(editingApp.id as any, updatedApp);
+    setApps(prev => prev.map(a => a.id === (editingApp as any).id ? { ...a, ...updatedApp } : a));
     resetForm();
     setIsEditDialogOpen(false);
     setEditingApp(null);
   };
 
   const handleDeleteApp = async (app: App) => {
-    if (!appsCollection || !resellerId) {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -146,8 +161,8 @@ export default function AppsPage() {
     const confirmDelete = window.confirm(`Tem certeza que deseja excluir o aplicativo "${app.name}"? Esta ação não pode ser desfeita.`);
     if (!confirmDelete) return;
 
-    const appRef = doc(firestore, 'resellers', resellerId, 'apps', app.id);
-    deleteDocumentNonBlocking(appRef);
+    await mysqlApi.deleteApp((app as any).id);
+    setApps(prev => prev.filter(a => a.id !== (app as any).id));
   };
 
   return (
@@ -226,7 +241,7 @@ export default function AppsPage() {
           </div>
 
           {/* Loading State */}
-          {appsLoading && (
+          {isLoading && (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               <span className="ml-2 text-muted-foreground">Carregando aplicativos...</span>
@@ -234,7 +249,7 @@ export default function AppsPage() {
           )}
 
           {/* Table View */}
-          {!appsLoading && viewMode === 'table' && (
+          {!isLoading && viewMode === 'table' && (
             <div className="border rounded-lg">
               <Table>
                 <TableHeader>
@@ -245,7 +260,7 @@ export default function AppsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredApps.map(app => (
+                  {filteredApps.map((app: any) => (
                     <TableRow key={app.id} className="hover:bg-muted/50">
                       <TableCell>
                         <div className="flex items-center gap-3">
@@ -292,9 +307,9 @@ export default function AppsPage() {
           )}
 
           {/* Grid View */}
-          {!appsLoading && viewMode === 'grid' && (
+          {!isLoading && viewMode === 'grid' && (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {filteredApps.map((app) => (
+              {filteredApps.map((app: any) => (
                 <Card key={app.id} className="border-0 shadow-lg hover:shadow-xl transition-all duration-300">
                   <CardHeader className="pb-4">
                     <div className="flex items-start justify-between">
@@ -362,7 +377,7 @@ export default function AppsPage() {
           )}
 
           {/* Empty State */}
-          {!appsLoading && filteredApps.length === 0 && (
+          {!isLoading && filteredApps.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <div className="rounded-full bg-muted p-4 mb-4">
                 <Smartphone className="h-8 w-8 text-muted-foreground" />
@@ -481,3 +496,4 @@ export default function AppsPage() {
     </div>
   );
 }
+

@@ -14,39 +14,43 @@ import { CalendarIcon, PlusCircle, ArrowLeft, Smartphone, ChevronDown, ChevronRi
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import Link from "next/link";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection } from "firebase/firestore";
-import { addDocumentNonBlocking } from "@/firebase/non-blocking-updates";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
+// Removed Firebase Firestore imports;
+import { mysqlApi } from '@/lib/mysql-api-client';
 import type { Plan, Panel, App } from "@/lib/definitions";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
 
 export default function AddClientPage() {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user } = useMySQL();
+  const resellerId = user?.id;
   
   // Force component re-render to prevent autocomplete
   const [formKey, setFormKey] = React.useState(Date.now());
 
   // Collections
-  const plansCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'plans');
-  }, [firestore, resellerId]);
 
-  const panelsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'panels');
-  }, [firestore, resellerId]);
+  const { data: plans } = usePlans();
+  const { data: panels } = usePanels();
+  const { refetch } = useClients();
+  const [apps, setApps] = React.useState<any[]>([]);
 
-  const appsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'apps');
-  }, [firestore, resellerId]);
-
-  const { data: plans } = useCollection<Plan>(plansCollection);
-  const { data: panels } = useCollection<Panel>(panelsCollection);
-  const { data: apps } = useCollection<App>(appsCollection);
+  React.useEffect(() => {
+    const loadApps = async () => {
+      if (!resellerId) return;
+      try {
+        const data = await mysqlApi.getApps();
+        setApps(data);
+      } catch (e) {
+        console.error('Erro ao carregar aplicativos:', e);
+        setApps([]);
+      }
+    };
+    loadApps();
+  }, [resellerId]);
 
   // Form state
   const [clientName, setClientName] = React.useState("");
@@ -86,8 +90,8 @@ export default function AddClientPage() {
     resetForm();
   }, [resetForm]);
 
-  const handleSaveClient = () => {
-    if (!resellerId || !firestore) {
+  const handleSaveClient = async () => {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -109,36 +113,38 @@ export default function AddClientPage() {
     }
 
     const plan = (plans || []).find(p => p.id === selectedPlanId);
-    const basePrice = useFixedValue ? parseFloat(fixedValue) : (plan?.saleValue ?? 0);
+    const basePrice = useFixedValue ? parseFloat(fixedValue) : (plan?.value ?? 0);
     const discount = parseFloat(discountValue || '0');
     const paymentValue = Math.max(0, (isNaN(basePrice) ? 0 : basePrice) - (isNaN(discount) ? 0 : discount));
 
-    const clientsCollection = collection(firestore, 'resellers', resellerId, 'clients');
     const newClient = {
-      resellerId,
+      reseller_id: resellerId,
       name: clientName.trim(),
-      startDate: format(new Date(), 'yyyy-MM-dd'),
-      planId: selectedPlanId,
-      paymentValue,
+      start_date: format(new Date(), 'yyyy-MM-dd'),
+      plan_id: selectedPlanId,
+      value: paymentValue,
       status: 'active' as const,
-      renewalDate: format(dueDate, 'yyyy-MM-dd'),
+      renewal_date: format(dueDate, 'yyyy-MM-dd'),
       phone: clientPhone.trim(),
       username: clientUsername.trim(),
       password: clientPassword.trim(),
       notes: clientNotes.trim(),
-      panelId: selectedPanelId,
-      discountValue: isNaN(discount) ? 0 : discount,
-      useFixedValue,
-      fixedValue: isNaN(basePrice) ? 0 : basePrice,
+      panel_id: selectedPanelId,
+      discount_value: isNaN(discount) ? 0 : discount,
+      use_fixed_value: useFixedValue,
+      fixed_value: isNaN(basePrice) ? 0 : basePrice,
       apps: selectedApps.length > 0 ? selectedApps : undefined,
     };
 
-    addDocumentNonBlocking(clientsCollection, newClient);
-    
-    // Reset form completely
-    resetForm();
-    
-    alert('Cliente adicionado com sucesso!');
+    try {
+      await mysqlApi.createClient(newClient);
+      await refetch();
+      resetForm();
+      alert('Cliente adicionado com sucesso!');
+    } catch (error) {
+      console.error('Error creating client:', error);
+      alert('Erro ao criar cliente');
+    }
   };
 
   return (
@@ -227,7 +233,7 @@ export default function AddClientPage() {
                   <SelectContent>
                     {(plans || []).map(pl => (
                       <SelectItem key={pl.id} value={pl.id}>
-                        {pl.name} - R$ {pl.saleValue.toFixed(2)}
+                        {pl.name} - R$ {pl.value.toFixed(2)}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -6,6 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Server, Users, Award, DollarSign, Activity } from "lucide-react";
 import type { Client, Panel, Plan } from "@/lib/definitions";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip, Cell, PieChart, Pie } from "recharts";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
 
 interface TopServersChartProps {
   clients?: Client[];
@@ -32,22 +35,19 @@ export function TopServersChart({ clients, panels, plans }: TopServersChartProps
     // Count clients per panel with revenue calculation
     const panelCounts = panels.map(panel => {
       // Find plans for this panel
-      const panelPlans = plans.filter(plan => plan.panelId === panel.id);
+      const panelPlans = plans.filter(plan => plan.panel_id === panel.id);
       const planIds = panelPlans.map(p => p.id);
 
       // Get active clients using plans from this panel
       const panelClients = clients.filter(client =>
-        client.status === 'active' && planIds.includes(client.planId)
+        client.status === 'active' && client.plan_id && planIds.includes(client.plan_id)
       );
 
       const clientCount = panelClients.length;
 
-      // Calculate revenue for this panel
+      // Calculate revenue for this panel (using value from client)
       const revenue = panelClients.reduce((sum, client) => {
-        if (client.useFixedValue && client.fixedValue) {
-          return sum + client.fixedValue;
-        }
-        return sum + (client.paymentValue - (client.discountValue || 0));
+        return sum + (client.value || 0);
       }, 0);
 
       return {
@@ -55,9 +55,7 @@ export function TopServersChart({ clients, panels, plans }: TopServersChartProps
         name: panel.name,
         clients: clientCount,
         revenue: revenue,
-        costType: panel.costType,
-        monthlyCost: panel.monthlyCost || 0,
-        costPerActive: panel.costPerActive || 0,
+        monthlyCost: panel.monthly_cost || 0,
       };
     });
 

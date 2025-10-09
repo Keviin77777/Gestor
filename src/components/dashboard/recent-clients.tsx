@@ -1,28 +1,21 @@
 "use client";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
 import { Client, Plan } from "@/lib/definitions";
-import { collection, limit, orderBy, query } from "firebase/firestore";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+// Removed Firebase Firestore imports;
 
 export function RecentClients() {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { data: clients, isLoading } = useClients();
+  const { data: plans } = usePlans();
 
-  const recentClientsQuery = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    const clientsRef = collection(firestore, 'resellers', resellerId, 'clients');
-    return query(clientsRef, orderBy('startDate', 'desc'), limit(5));
-  }, [firestore, resellerId]);
-
-  const plansCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'plans');
-  }, [firestore, resellerId]);
-
-  const { data: recentClients, isLoading } = useCollection<Client>(recentClientsQuery);
-  const { data: plans } = useCollection<Plan>(plansCollection);
+  // Get 5 most recent clients
+  const recentClients = clients
+    ?.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, 5) || [];
 
   if (isLoading) {
     return <div>Carregando...</div>;
@@ -38,10 +31,10 @@ export function RecentClients() {
           <div className="ml-4 space-y-1">
             <p className="text-sm font-medium leading-none">{client.name}</p>
             <p className="text-sm text-muted-foreground">
-              {plans?.find(p => p.id === client.planId)?.name || client.planId}
+              {plans?.find(p => p.id === client.plan_id)?.name || client.plan_id}
             </p>
           </div>
-          <div className="ml-auto font-medium">+R${client.paymentValue.toFixed(2)}</div>
+          <div className="ml-auto font-medium">+R${(client.value || 0).toFixed(2)}</div>
         </div>
       ))}
        {!recentClients?.length && <p className="text-sm text-muted-foreground">Nenhum cliente recente.</p>}

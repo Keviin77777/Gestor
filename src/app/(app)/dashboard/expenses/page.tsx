@@ -12,16 +12,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { PlusCircle, DollarSign, Calendar, Trash2, Edit, RefreshCw, Server, MoreVertical } from "lucide-react";
-import { useAuth, useFirebase, useMemoFirebase } from "@/firebase";
-import { collection, doc } from "firebase/firestore";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { addDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase/non-blocking-updates";
+
+// Removed Firebase Firestore imports;
+// Removed useCollection - using direct API calls;
+import { mysqlApi } from '@/lib/mysql-api-client';
 import type { Expense, Panel, Client, Plan } from "@/lib/definitions";
 import { format } from "date-fns";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
+
+import { useMySQL } from '@/lib/mysql-provider';
 
 export default function ExpensesPage() {
-    const { firestore, user } = useFirebase();
-    const resellerId = user?.uid;
+    const { user } = useMySQL();
+    const resellerId = user?.id;
     
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [description, setDescription] = useState("");
@@ -30,30 +35,29 @@ export default function ExpensesPage() {
     const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
     // Collections
-    const expensesCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'expenses');
-    }, [firestore, resellerId]);
 
-    const panelsCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'panels');
-    }, [firestore, resellerId]);
+    const [expenses, setExpenses] = React.useState<any[]>([]);
+    const [isLoading, setIsLoading] = React.useState(false);
 
-    const clientsCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'clients');
-    }, [firestore, resellerId]);
-
-    const plansCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'plans');
-    }, [firestore, resellerId]);
-
-    const { data: expenses, isLoading } = useCollection<Expense>(expensesCollection);
-    const { data: panels } = useCollection<Panel>(panelsCollection);
-    const { data: clients } = useCollection<Client>(clientsCollection);
-    const { data: plans } = useCollection<Plan>(plansCollection);
+    // Load expenses
+    React.useEffect(() => {
+        const loadExpenses = async () => {
+            if (!resellerId) return;
+            try {
+                setIsLoading(true);
+                const data = await mysqlApi.getExpenses();
+                setExpenses(data);
+            } catch (error) {
+                console.error('Error loading expenses:', error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        loadExpenses();
+    }, [resellerId]);
+    const { data: panels, isLoading: panelsLoading } = usePanels();
+    const { data: clients, isLoading: clientsLoading } = useClients();
+    const { data: plans, isLoading: plansLoading } = usePlans();
 
     // Calculate automatic panel expenses
     const panelExpenses = useMemo(() => {
@@ -61,20 +65,16 @@ export default function ExpensesPage() {
 
         return panels.map(panel => {
             // Find plans for this panel
-            const panelPlans = plans.filter(plan => plan.panelId === panel.id);
+            const panelPlans = plans.filter(plan => plan.panel_id === panel.id);
             
             // Find active clients using plans from this panel
             const activeClientsInPanel = clients.filter(client => 
                 client.status === 'active' && 
-                panelPlans.some(plan => plan.id === client.planId)
+                panelPlans.some(plan => plan.id === client.plan_id)
             );
 
-            let cost = 0;
-            if (panel.costType === 'fixed' && panel.monthlyCost) {
-                cost = panel.monthlyCost;
-            } else if (panel.costType === 'perActive' && panel.costPerActive) {
-                cost = panel.costPerActive * activeClientsInPanel.length;
-            }
+            // Use monthly_cost from panel
+            const cost = panel.monthly_cost || 0;
 
             return {
                 panel,
@@ -87,41 +87,43 @@ export default function ExpensesPage() {
 
     // Auto-generate panel expenses
     const generatePanelExpenses = async () => {
-        if (!expensesCollection || !resellerId) return;
+        if (!resellerId) return;
 
         const today = format(new Date(), 'yyyy-MM-dd');
         
         for (const panelExpense of panelExpenses) {
             if (panelExpense.cost > 0) {
                 const expense: Partial<Expense> = {
-                    resellerId,
+                    reseller_id: resellerId,
                     date: today,
                     value: panelExpense.cost,
                     type: 'fixed',
                     description: panelExpense.description
                 };
                 
-                await addDocumentNonBlocking(expensesCollection, expense);
+                await mysqlApi.createExpense(expense);
             }
         }
     };
 
     const handleAddExpense = async () => {
-        if (!expensesCollection || !resellerId) return;
+        if (!resellerId) return;
         if (!description.trim() || !value.trim()) {
             alert('Preencha todos os campos obrigatórios.');
             return;
         }
 
         const expense: Partial<Expense> = {
-            resellerId,
+            reseller_id: resellerId,
             date,
             value: parseFloat(value),
             type,
             description: description.trim()
         };
 
-        await addDocumentNonBlocking(expensesCollection, expense);
+        const created = await mysqlApi.createExpense(expense);
+        // Atualiza a lista imediatamente
+        setExpenses(prev => [created as any, ...prev]);
         
         // Reset form
         setDescription("");
@@ -132,7 +134,7 @@ export default function ExpensesPage() {
     };
 
     const handleDeleteExpense = async (expenseId: string, expenseDescription: string) => {
-        if (!resellerId || !firestore) {
+        if (!resellerId) {
             alert('Erro: usuário não autenticado.');
             return;
         }
@@ -140,8 +142,13 @@ export default function ExpensesPage() {
         const confirmDelete = window.confirm(`Tem certeza que deseja excluir a despesa "${expenseDescription}"? Esta ação não pode ser desfeita.`);
         if (!confirmDelete) return;
 
-        const expenseRef = doc(firestore, 'resellers', resellerId, 'expenses', expenseId);
-        await deleteDocumentNonBlocking(expenseRef);
+        try {
+            await mysqlApi.deleteExpense(expenseId);
+            // Remove imediatamente da lista
+            setExpenses(prev => prev.filter((e: any) => e.id !== expenseId));
+        } catch (error) {
+            console.error('Error deleting expense:', error);
+        }
     };
 
     const resetForm = () => {
@@ -214,11 +221,11 @@ export default function ExpensesPage() {
                                         <div className="flex items-center justify-between text-sm">
                                             <span className="text-slate-600 dark:text-slate-400">Custo:</span>
                                             <span className="font-semibold text-green-600 dark:text-green-400">
-                                                R$ {panelExpense.cost.toFixed(2)}
+                                                R$ {(Number(panelExpense.cost) || 0).toFixed(2)}
                                             </span>
                                         </div>
                                         <div className="text-xs text-slate-500 dark:text-slate-400">
-                                            {panelExpense.panel.costType === 'fixed' ? 'Custo Fixo' : `R$ ${panelExpense.panel.costPerActive?.toFixed(2)} por ativo`}
+                                            Custo Mensal: R$ {(Number(panelExpense.panel.monthly_cost) || 0).toFixed(2)}
                                         </div>
                                     </div>
                                 </div>
@@ -419,3 +426,4 @@ export default function ExpensesPage() {
         </div>
     );
 }
+

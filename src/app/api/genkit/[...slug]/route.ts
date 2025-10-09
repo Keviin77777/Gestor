@@ -1,3 +1,10 @@
-import {genkit} from '@genkit-ai/next';
+import genkit from '@genkit-ai/next';
 
-export const {GET, POST} = genkit();
+// TODO: Configure genkit properly
+export async function GET() {
+  return new Response('Genkit not configured', { status: 501 });
+}
+
+export async function POST() {
+  return new Response('Genkit not configured', { status: 501 });
+}

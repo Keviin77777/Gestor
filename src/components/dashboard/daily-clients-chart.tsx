@@ -11,6 +11,7 @@ import { format, subDays, parseISO, startOfDay, isSameDay, startOfMonth, endOfMo
 import { ptBR } from "date-fns/locale";
 import type { Client } from "@/lib/definitions";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useClients } from '@/hooks/use-clients';
 
 interface DailyClientsChartProps {
   clients?: Client[];
@@ -48,7 +49,7 @@ export function DailyClientsChart({ clients }: DailyClientsChartProps) {
     // Count clients per day
     const dailyCounts = monthDays.map(date => {
       const count = clients.filter(client => {
-        const clientDate = parseISO(client.startDate);
+        const clientDate = parseISO(client.start_date);
         return isSameDay(clientDate, date);
       }).length;
 
@@ -66,13 +67,13 @@ export function DailyClientsChart({ clients }: DailyClientsChartProps) {
 
     // Calculate stats for selected month
     const monthClients = clients.filter(client => {
-      const clientDate = parseISO(client.startDate);
+      const clientDate = parseISO(client.start_date);
       return clientDate >= monthStart && clientDate <= monthEnd;
     });
 
     const total = monthClients.length;
     const todayCount = clients.filter(client => 
-      isSameDay(parseISO(client.startDate), today)
+      isSameDay(parseISO(client.start_date), today)
     ).length;
     
     const last7Days = dailyCounts.slice(-7);

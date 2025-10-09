@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,34 +23,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { collection, doc } from "firebase/firestore";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { addDocumentNonBlocking, deleteDocumentNonBlocking, updateDocumentNonBlocking } from "@/firebase/non-blocking-updates";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed Firebase Firestore imports;
+// Removed useCollection - using direct API calls;
+import { mysqlApi } from '@/lib/mysql-api-client';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
 
 export default function PlansPage() {
-    const { firestore, user } = useFirebase();
-    const resellerId = user?.uid;
+    const { user } = useMySQL();
+    const resellerId = user?.id;
 
-    const panelsCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'panels');
-    }, [firestore, resellerId]);
-
-    const plansCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'plans');
-    }, [firestore, resellerId]);
-
-    const clientsCollection = useMemoFirebase(() => {
-        if (!resellerId) return null;
-        return collection(firestore, 'resellers', resellerId, 'clients');
-    }, [firestore, resellerId]);
-
-    const { data: panels } = useCollection<Panel>(panelsCollection);
-    const { data: plans, isLoading: plansLoading } = useCollection<Plan>(plansCollection);
-    const { data: clients } = useCollection<Client>(clientsCollection);
+    const { data: panels, isLoading: panelsLoading } = usePanels();
+    const { data: plans, isLoading: plansLoading, refetch: refetchPlans } = usePlans();
+    const { data: clients, isLoading: clientsLoading } = useClients();
 
     // View states
     const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
@@ -76,9 +64,17 @@ export default function PlansPage() {
         setPlanPanelId('');
     };
 
-    const formatDuration = (months: number) => {
-        // Verificar se months é um número válido
-        if (!months || isNaN(months) || months <= 0) return '1 mês';
+    const formatCurrency = (value: number | string): string => {
+        const numValue = typeof value === 'string' ? parseFloat(value) : value;
+        return numValue.toFixed(2).replace('.', ',');
+    };
+
+    const formatDuration = (durationValue: number) => {
+        // Verificar se é um número válido
+        if (!durationValue || isNaN(durationValue) || durationValue <= 0) return '1 mês';
+        
+        // Assumir que o valor é em meses (duration_days do banco)
+        const months = durationValue;
         
         if (months === 1) return '1 mês';
         if (months < 12) return `${months} meses`;
@@ -93,8 +89,8 @@ export default function PlansPage() {
         return `${years} ano${years > 1 ? 's' : ''} e ${remainingMonths} mês${remainingMonths > 1 ? 'es' : ''}`;
     };
 
-    const getActiveClientsForPlan = (planId: string) => {
-        return clients?.filter(client => client.planId === planId && client.status === 'active').length || 0;
+    const getActiveClientsForPlan = (plan_id: string) => {
+        return clients?.filter(client => client.plan_id === plan_id && client.status === 'active').length || 0;
     };
 
     // Grouped plans by server
@@ -103,18 +99,18 @@ export default function PlansPage() {
 
         let filtered = plans.filter(plan => {
             const matchesSearch = plan.name.toLowerCase().includes(searchTerm.toLowerCase());
-            const matchesPanel = filterPanel === 'all' || plan.panelId === filterPanel;
+            const matchesPanel = filterPanel === 'all' || plan.panel_id === filterPanel;
             const matchesDuration = filterDuration === 'all' || 
-                (filterDuration === '1-3' && plan.duration >= 1 && plan.duration <= 3) ||
-                (filterDuration === '4-6' && plan.duration >= 4 && plan.duration <= 6) ||
-                (filterDuration === '7-12' && plan.duration >= 7 && plan.duration <= 12);
+                (filterDuration === '1-3' && plan.duration_days >= 1 && plan.duration_days <= 3) ||
+                (filterDuration === '4-6' && plan.duration_days >= 4 && plan.duration_days <= 6) ||
+                (filterDuration === '7-12' && plan.duration_days >= 7 && plan.duration_days <= 12);
             
             return matchesSearch && matchesPanel && matchesDuration;
         });
 
         // Group by panel
         const grouped = filtered.reduce((acc, plan) => {
-            const panelId = plan.panelId;
+            const panelId = plan.panel_id || "no-panel";
             if (!acc[panelId]) {
                 acc[panelId] = [];
             }
@@ -133,12 +129,12 @@ export default function PlansPage() {
                         bValue = b.name.toLowerCase();
                         break;
                     case 'price':
-                        aValue = a.saleValue;
-                        bValue = b.saleValue;
+                        aValue = a.value;
+                        bValue = b.value;
                         break;
                     case 'duration':
-                        aValue = a.duration;
-                        bValue = b.duration;
+                        aValue = a.duration_days;
+                        bValue = b.duration_days;
                         break;
                     case 'clients':
                         aValue = getActiveClientsForPlan(a.id);
@@ -160,8 +156,8 @@ export default function PlansPage() {
     // Get total count for badge
     const totalPlansCount = Object.values(groupedPlans).reduce((sum, plans) => sum + plans.length, 0);
 
-    const handleAddPlan = () => {
-        if (!plansCollection || !resellerId) {
+    const handleAddPlan = async () => {
+        if (!resellerId) {
             alert('Erro: usuário não autenticado.');
             return;
         }
@@ -178,31 +174,38 @@ export default function PlansPage() {
             return;
         }
 
-        const newPlan: Omit<Plan, 'id'> = {
-            resellerId,
-            panelId: planPanelId,
+        const newPlan = {
+            reseller_id: resellerId,
+            panel_id: planPanelId,
             name: planName.trim(),
-            saleValue: parseFloat(planSaleValue.replace(',', '.')),
-            duration: planDuration,
+            value: parseFloat(planSaleValue.replace(',', '.')),
+            duration_days: planDuration,
         };
 
-        addDocumentNonBlocking(plansCollection, newPlan);
-        resetPlanForm();
-        setIsAddPlanDialogOpen(false);
+        try {
+            await mysqlApi.createPlan(newPlan);
+            await refetchPlans();
+            resetPlanForm();
+            setIsAddPlanDialogOpen(false);
+        } catch (error) {
+            console.error('Erro ao criar plano:', error);
+            alert('Erro ao criar plano. Tente novamente.');
+        }
     };
 
     const handleEditPlan = (plan: Plan) => {
         setEditingPlan(plan);
         setPlanName(plan.name);
-        // Formatar o valor corretamente para edição - manter como string com ponto para input number
-        setPlanSaleValue(plan.saleValue.toFixed(2));
-        setPlanDuration(plan.duration || 1);
-        setPlanPanelId(plan.panelId);
+        // Formatar o valor corretamente para edição - converter para número se for string
+        const valueAsNumber = typeof plan.value === 'string' ? parseFloat(plan.value) : plan.value;
+        setPlanSaleValue(valueAsNumber.toFixed(2));
+        setPlanDuration(plan.duration_days || 1);
+        setPlanPanelId(plan.panel_id || '');
         setIsEditPlanDialogOpen(true);
     };
 
-    const handleUpdatePlan = () => {
-        if (!editingPlan || !plansCollection || !resellerId) {
+    const handleUpdatePlan = async () => {
+        if (!resellerId) {
             alert('Erro: dados não encontrados.');
             return;
         }
@@ -221,20 +224,25 @@ export default function PlansPage() {
 
         const updatedPlan: Partial<Plan> = {
             name: planName.trim(),
-            saleValue: parseFloat(planSaleValue.replace(',', '.')),
-            duration: planDuration,
-            panelId: planPanelId,
+            value: parseFloat(planSaleValue.replace(',', '.')),
+            duration_days: planDuration,
+            panel_id: planPanelId,
         };
 
-        const planRef = doc(firestore, 'resellers', resellerId, 'plans', editingPlan.id);
-        updateDocumentNonBlocking(planRef, updatedPlan);
-        resetPlanForm();
-        setIsEditPlanDialogOpen(false);
-        setEditingPlan(null);
+        try {
+            await mysqlApi.updatePlan(editingPlan!.id, updatedPlan);
+            await refetchPlans();
+            resetPlanForm();
+            setIsEditPlanDialogOpen(false);
+            setEditingPlan(null);
+        } catch (error) {
+            console.error('Erro ao atualizar plano:', error);
+            alert('Erro ao atualizar plano. Tente novamente.');
+        }
     };
 
     const handleDeletePlan = async (plan: Plan) => {
-        if (!plansCollection || !resellerId) {
+        if (!resellerId) {
             alert('Erro: usuário não autenticado.');
             return;
         }
@@ -248,8 +256,13 @@ export default function PlansPage() {
         const confirmDelete = window.confirm(`Tem certeza que deseja excluir o plano "${plan.name}"? Esta ação não pode ser desfeita.`);
         if (!confirmDelete) return;
 
-        const planRef = doc(firestore, 'resellers', resellerId, 'plans', plan.id);
-        deleteDocumentNonBlocking(planRef);
+        try {
+            await mysqlApi.deletePlan(plan.id);
+            await refetchPlans();
+        } catch (error) {
+            console.error('Erro ao excluir plano:', error);
+            alert('Erro ao excluir plano. Tente novamente.');
+        }
     };
 
     return (
@@ -400,7 +413,10 @@ export default function PlansPage() {
                                                                 </div>
                                                                 <div className="flex items-center gap-1">
                                                                     <DollarSign className="h-4 w-4 text-green-500" />
-                                                                    <span>R$ {serverPlans.reduce((sum, plan) => sum + (plan.saleValue * getActiveClientsForPlan(plan.id)), 0).toFixed(0)} receita</span>
+                                                                    <span>R$ {serverPlans.reduce((sum, plan) => {
+                                                                        const value = typeof plan.value === 'string' ? parseFloat(plan.value) : plan.value;
+                                                                        return sum + (value * getActiveClientsForPlan(plan.id));
+                                                                    }, 0).toFixed(0)} receita</span>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -496,12 +512,12 @@ export default function PlansPage() {
                                                                 </TableCell>
                                                                 <TableCell>
                                                                     <div className="font-semibold text-green-600">
-                                                                        R$ {plan.saleValue.toFixed(2).replace('.', ',')}
+                                                                        R$ {formatCurrency(plan.value)}
                                                                     </div>
                                                                 </TableCell>
                                                                 <TableCell>
                                                                     <Badge variant="outline" className="font-medium">
-                                                                        {formatDuration(plan.duration)}
+                                                                        {formatDuration(plan.duration_days)}
                                                                     </Badge>
                                                                 </TableCell>
                                                                 <TableCell>
@@ -591,7 +607,10 @@ export default function PlansPage() {
                                                                 </div>
                                                                 <div className="flex items-center gap-1.5">
                                                                     <DollarSign className="h-4 w-4 text-green-500" />
-                                                                    <span className="font-medium">R$ {serverPlans.reduce((sum, plan) => sum + (plan.saleValue * getActiveClientsForPlan(plan.id)), 0).toFixed(0)}</span>
+                                                                    <span className="font-medium">R$ {serverPlans.reduce((sum, plan) => {
+                                                                        const value = typeof plan.value === 'string' ? parseFloat(plan.value) : plan.value;
+                                                                        return sum + (value * getActiveClientsForPlan(plan.id));
+                                                                    }, 0).toFixed(0)}</span>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -636,7 +655,7 @@ export default function PlansPage() {
                                                         <div className="flex items-center gap-2 mt-1">
                                                             <CalendarIcon className="h-3 w-3 text-slate-500" />
                                                             <span className="text-xs text-slate-500 font-medium">
-                                                                {formatDuration(plan.duration)}
+                                                                {formatDuration(plan.duration_days)}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -676,10 +695,9 @@ export default function PlansPage() {
                                                     </div>
                                                 </div>
                                                 <div className="text-3xl font-bold text-emerald-700 dark:text-emerald-300 mb-1">
-                                                    R$ {plan.saleValue.toFixed(2).replace('.', ',')}
+                                                    R$ {formatCurrency(plan.value)}
                                                 </div>
 
-                                                
                                                 {/* Decorative elements */}
                                                 <div className="absolute top-0 right-0 w-16 h-16 bg-gradient-to-br from-emerald-500/10 to-teal-500/10 rounded-full blur-xl"></div>
                                                 <div className="absolute bottom-0 left-0 w-12 h-12 bg-gradient-to-tr from-green-500/10 to-emerald-500/10 rounded-full blur-lg"></div>
@@ -694,7 +712,7 @@ export default function PlansPage() {
                                                     <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Servidor</span>
                                                 </div>
                                                 <Badge variant="secondary" className="bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 px-3 py-1">
-                                                    {panels?.find(p => p.id === plan.panelId)?.name || 'N/A'}
+                                                    {panels?.find(p => p.id === plan.panel_id)?.name || 'N/A'}
                                                 </Badge>
                                             </div>
                                             
@@ -710,7 +728,6 @@ export default function PlansPage() {
                                                     </span>
                                                 </div>
                                             </div>
-
 
                                         </div>
 
@@ -999,3 +1016,5 @@ export default function PlansPage() {
         </div>
     );
 }
+
+

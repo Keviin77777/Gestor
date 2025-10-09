@@ -10,6 +10,8 @@
 
 import {ai, hasGemini} from '@/ai/genkit';
 import {z} from 'genkit';
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
 
 const SmartRenewalNotificationsInputSchema = z.object({
   clientsExpiringSoon: z.array(

@@ -25,7 +25,6 @@ import {
   Filter,
   Grid,
   List,
-  Eye,
   MoreVertical,
   Wifi,
   WifiOff,
@@ -55,40 +54,29 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useFirebase, useMemoFirebase } from "@/firebase";
-import { useCollection } from "@/firebase/firestore/use-collection";
-import { collection, doc } from "firebase/firestore";
-import { addDocumentNonBlocking, updateDocumentNonBlocking, deleteDocumentNonBlocking } from "@/firebase/non-blocking-updates";
+import { useMySQL } from '@/lib/mysql-provider';
+// Removed useCollection - using direct API calls;
+// Removed Firebase Firestore imports;
+import { mysqlApi } from '@/lib/mysql-api-client';
 import type { Panel, Plan, Client } from "@/lib/definitions";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
+import { usePanels } from '@/hooks/use-panels';
 
 export default function ServersPage() {
-  const { firestore, user } = useFirebase();
-  const resellerId = user?.uid;
+  const { user } = useMySQL();
+  const resellerId = user?.id;
 
   // Collections
-  const panelsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'panels');
-  }, [firestore, resellerId]);
 
-  const plansCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'plans');
-  }, [firestore, resellerId]);
-
-  const clientsCollection = useMemoFirebase(() => {
-    if (!resellerId) return null;
-    return collection(firestore, 'resellers', resellerId, 'clients');
-  }, [firestore, resellerId]);
-
-  const { data: panels, isLoading: panelsLoading } = useCollection<Panel>(panelsCollection);
-  const { data: plans } = useCollection<Plan>(plansCollection);
-  const { data: clients } = useCollection<Client>(clientsCollection);
+  const { data: panels, isLoading: panelsLoading, refetch: refetchPanels } = usePanels();
+  const { data: plans, isLoading: plansLoading } = usePlans();
+  const { data: clients, isLoading: clientsLoading } = useClients();
 
   // View states
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterCostType, setFilterCostType] = useState('all');
+  const [filterCostType, setFilterCostType] = useState("all");
   const [filterStatus, setFilterStatus] = useState('all');
   const [sortBy, setSortBy] = useState<'name' | 'clients' | 'cost' | 'renewal'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -99,7 +87,7 @@ export default function ServersPage() {
   const [editingPanel, setEditingPanel] = React.useState<Panel | null>(null);
   const [panelName, setPanelName] = React.useState("");
   const [renewalDate, setRenewalDate] = React.useState("");
-  const [costType, setCostType] = React.useState<"fixed" | "perActive">("fixed");
+  // costType removed - using fixed only
   const [monthlyCost, setMonthlyCost] = React.useState("");
   const [costPerActive, setCostPerActive] = React.useState("");
   
@@ -107,7 +95,7 @@ export default function ServersPage() {
   const [selectedIntegrationType, setSelectedIntegrationType] = React.useState<string>("");
   const [showIntegrationFields, setShowIntegrationFields] = React.useState(false);
   
-  // Sigma IPTV states
+  // Qpanel/Sigma states
   const [sigmaUrl, setSigmaUrl] = React.useState("");
   const [sigmaUsername, setSigmaUsername] = React.useState("");
   const [sigmaToken, setSigmaToken] = React.useState("");
@@ -123,7 +111,7 @@ export default function ServersPage() {
   const resetForm = () => {
     setPanelName("");
     setRenewalDate("");
-    setCostType("fixed");
+    // setCostType removed
     setMonthlyCost("");
     setCostPerActive("");
     setSelectedIntegrationType("");
@@ -135,8 +123,8 @@ export default function ServersPage() {
     setConnectionStatus({ tested: false, success: false, message: "" });
   };
 
-  const handleSavePanel = () => {
-    if (!panelsCollection || !resellerId) {
+  const handleSavePanel = async () => {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -150,38 +138,39 @@ export default function ServersPage() {
     }
 
     const newPanel: Partial<Panel> = {
-      resellerId,
+      reseller_id: resellerId,
       name: panelName.trim(),
-      renewalDate,
-      costType,
-      // Sigma IPTV integration
-      sigmaConnected: connectionStatus.success && !!connectionStatus.userId,
+      renewal_date: renewalDate,
+      // costType removed,
+      // Qpanel/Sigma integration
+      sigma_connected: connectionStatus.success && !!connectionStatus.userId,
     };
 
     // Add cost fields based on type
-    if (costType === 'fixed' && monthlyCost) {
-      newPanel.monthlyCost = parseFloat(monthlyCost);
+    if (monthlyCost) {
+      newPanel.monthly_cost = parseFloat(monthlyCost);
     }
-    if (costType === 'perActive' && costPerActive) {
-      newPanel.costPerActive = parseFloat(costPerActive);
+    if (false /* perActive removed */) {
+      newPanel.monthly_cost = parseFloat(costPerActive);
     }
     if (sigmaUrl.trim()) {
-      newPanel.sigmaUrl = sigmaUrl.trim();
+      newPanel.sigma_url = sigmaUrl.trim();
     }
     if (sigmaUsername.trim()) {
-      newPanel.sigmaUsername = sigmaUsername.trim();
+      newPanel.sigma_username = sigmaUsername.trim();
     }
     if (sigmaToken.trim()) {
-      newPanel.sigmaToken = sigmaToken.trim();
+      newPanel.sigma_token = sigmaToken.trim();
     }
     if (connectionStatus.userId) {
-      newPanel.sigmaUserId = connectionStatus.userId;
+      newPanel.sigma_user_id = connectionStatus.userId;
     }
     if (connectionStatus.success) {
-      newPanel.sigmaLastSync = new Date().toISOString();
+      newPanel// .sigmaLastSync removed = new Date().toISOString();
     }
 
-    addDocumentNonBlocking(panelsCollection, newPanel);
+    await mysqlApi.createPanel(newPanel);
+    await refetchPanels(); // Recarregar lista de painéis
     resetForm();
     setIsDialogOpen(false);
   };
@@ -189,25 +178,34 @@ export default function ServersPage() {
   const handleEditPanel = (panel: Panel) => {
     setEditingPanel(panel);
     setPanelName(panel.name);
-    setRenewalDate(panel.renewalDate);
-    setCostType(panel.costType);
-    setMonthlyCost(panel.monthlyCost?.toString() || '');
-    setCostPerActive(panel.costPerActive?.toString() || '');
-    setSigmaUrl(panel.sigmaUrl || '');
-    // Se já está conectado, deixa os campos vazios para permitir substituição
-    setSigmaUsername(panel.sigmaConnected ? '' : (panel.sigmaUsername || ''));
-    setSigmaToken(panel.sigmaConnected ? '' : (panel.sigmaToken || ''));
+    setRenewalDate(panel.renewal_date || '');
+    // setCostType removed
+    setMonthlyCost(panel.monthly_cost?.toString() || '');
+    setCostPerActive(panel.monthly_cost?.toString() || '');
+    
+    // Configurar campos Sigma
+    setSigmaUrl(panel.sigma_url || '');
+    setSigmaUsername(panel.sigma_username || '');
+    setSigmaToken(panel.sigma_token || '');
+    
+    
+    // Se tem integração Sigma configurada, marcar como selecionado
+    if (panel.sigma_url || panel.sigma_username || panel.sigma_token) {
+      setSelectedIntegrationType('qpanel-sigma');
+      setShowIntegrationFields(true);
+    }
+    
     setConnectionStatus({
-      tested: !!panel.sigmaConnected,
-      success: !!panel.sigmaConnected,
-      message: panel.sigmaConnected ? 'Conectado com sucesso' : '',
-      userId: panel.sigmaUserId
+      tested: !!panel.sigma_connected,
+      success: !!panel.sigma_connected,
+      message: panel.sigma_connected ? 'Conectado com sucesso' : '',
+      userId: panel.sigma_user_id
     });
     setIsEditDialogOpen(true);
   };
 
-  const handleUpdatePanel = () => {
-    if (!editingPanel || !panelsCollection || !resellerId) {
+  const handleUpdatePanel = async () => {
+    if (!resellerId) {
       alert('Erro: dados não encontrados.');
       return;
     }
@@ -222,52 +220,50 @@ export default function ServersPage() {
 
     const updatedPanel: Partial<Panel> = {
       name: panelName.trim(),
-      renewalDate,
-      costType,
-      // Sigma IPTV integration
-      sigmaConnected: connectionStatus.success && !!connectionStatus.userId,
+      renewal_date: renewalDate,
+      monthly_cost: parseFloat(monthlyCost) || 0,
+      // Qpanel/Sigma integration
+      sigma_connected: connectionStatus.success && !!connectionStatus.userId,
     };
-
-    // Add optional fields only if they have values, and clear opposite field
-    if (costType === 'fixed') {
-      if (monthlyCost) {
-        updatedPanel.monthlyCost = parseFloat(monthlyCost);
-      }
-      // Clear costPerActive when switching to fixed
-      updatedPanel.costPerActive = null as any; // Use null to remove field
-    }
-    if (costType === 'perActive') {
-      if (costPerActive) {
-        updatedPanel.costPerActive = parseFloat(costPerActive);
-      }
-      // Clear monthlyCost when switching to perActive
-      updatedPanel.monthlyCost = null as any; // Use null to remove field
-    }
+    
+    // Sigma URL sempre atualiza se preenchido
     if (sigmaUrl.trim()) {
-      updatedPanel.sigmaUrl = sigmaUrl.trim();
+      updatedPanel.sigma_url = sigmaUrl.trim();
     }
+    
+    // Sigma Username: só atualiza se foi digitado algo novo
+    // Se o campo está vazio mas existe valor salvo, mantém o valor existente
     if (sigmaUsername.trim()) {
-      updatedPanel.sigmaUsername = sigmaUsername.trim();
+      updatedPanel.sigma_username = sigmaUsername.trim();
+    } else if (!editingPanel?.sigma_username) {
+      // Se não tem valor salvo e campo está vazio, limpa
+      updatedPanel.sigma_username = '';
     }
+    // Se tem valor salvo e campo está vazio, não inclui no update (mantém o existente)
+    
+    // Sigma Token: mesma lógica do username
     if (sigmaToken.trim()) {
-      updatedPanel.sigmaToken = sigmaToken.trim();
+      updatedPanel.sigma_token = sigmaToken.trim();
+    } else if (!editingPanel?.sigma_token) {
+      // Se não tem valor salvo e campo está vazio, limpa
+      updatedPanel.sigma_token = '';
     }
+    // Se tem valor salvo e campo está vazio, não inclui no update (mantém o existente)
+    
     if (connectionStatus.userId) {
-      updatedPanel.sigmaUserId = connectionStatus.userId;
-    }
-    if (connectionStatus.success) {
-      updatedPanel.sigmaLastSync = new Date().toISOString();
+      updatedPanel.sigma_user_id = connectionStatus.userId;
     }
 
-    const panelRef = doc(firestore, 'resellers', resellerId, 'panels', editingPanel.id);
-    updateDocumentNonBlocking(panelRef, updatedPanel);
+    
+    await mysqlApi.updatePanel(editingPanel!.id, updatedPanel);
+    await refetchPanels(); // Recarregar lista de painéis
     resetForm();
     setIsEditDialogOpen(false);
     setEditingPanel(null);
   };
 
   const handleDeletePanel = async (panel: Panel) => {
-    if (!panelsCollection || !resellerId) {
+    if (!resellerId) {
       alert('Erro: usuário não autenticado.');
       return;
     }
@@ -275,31 +271,35 @@ export default function ServersPage() {
     const confirmDelete = window.confirm(`Tem certeza que deseja excluir o servidor "${panel.name}"? Esta ação não pode ser desfeita.`);
     if (!confirmDelete) return;
 
-    const panelRef = doc(firestore, 'resellers', resellerId, 'panels', panel.id);
-    deleteDocumentNonBlocking(panelRef);
+    
+    // TODO: Implement delete via API
   };
 
-  const getActiveClientsForPanel = (panelId: string) => {
+  const getActiveClientsForPanel = (panel_id: string) => {
     if (!clients || !plans) return 0;
     
-    const panelPlans = plans.filter(plan => plan.panelId === panelId);
+    const panelPlans = plans.filter(plan => plan.panel_id === panel_id);
     return clients.filter(client => 
       client.status === 'active' && 
-      panelPlans.some(plan => plan.id === client.planId)
+      panelPlans.some(plan => plan.id === client.plan_id)
     ).length;
   };
 
   const calculatePanelCost = (panel: Panel) => {
-    if (panel.costType === 'fixed') {
-      return panel.monthlyCost || 0;
+    const cost = Number(panel.monthly_cost) || 0;
+    if (true /* monthly_cost is number */) {
+      return cost;
     } else {
       const activeClients = getActiveClientsForPanel(panel.id);
-      return (panel.costPerActive || 0) * activeClients;
+      return cost * activeClients;
     }
   };
 
   const isExpiringSoon = (renewalDate: string) => {
-    return new Date(renewalDate) <= new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const renewal = new Date(renewalDate + 'T00:00:00');
+    const sevenDaysFromNow = new Date();
+    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+    return renewal <= sevenDaysFromNow;
   };
 
   const handleTestSigmaConnection = async () => {
@@ -307,7 +307,7 @@ export default function ServersPage() {
       setConnectionStatus({
         tested: true,
         success: false,
-        message: 'Preencha todos os campos do Sigma IPTV'
+        message: 'Preencha todos os campos do Qpanel/Sigma'
       });
       return;
     }
@@ -360,11 +360,11 @@ export default function ServersPage() {
 
     let filtered = panels.filter(panel => {
       const matchesSearch = panel.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                           panel.login.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCostType = filterCostType === 'all' || panel.costType === filterCostType;
+                           panel.login?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCostType = true; // Always match
       const matchesStatus = filterStatus === 'all' || 
-        (filterStatus === 'expiring' && isExpiringSoon(panel.renewalDate)) ||
-        (filterStatus === 'active' && !isExpiringSoon(panel.renewalDate));
+        (filterStatus === 'expiring' && panel.renewal_date && isExpiringSoon(panel.renewal_date)) ||
+        (filterStatus === 'active' && (!panel.renewal_date || !isExpiringSoon(panel.renewal_date)));
       
       return matchesSearch && matchesCostType && matchesStatus;
     });
@@ -387,8 +387,8 @@ export default function ServersPage() {
           bValue = calculatePanelCost(b);
           break;
         case 'renewal':
-          aValue = new Date(a.renewalDate);
-          bValue = new Date(b.renewalDate);
+          aValue = new Date(a.created_at);
+          bValue = new Date(b.created_at);
           break;
         default:
           return 0;
@@ -420,7 +420,7 @@ export default function ServersPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <Eye className="h-5 w-5" />
+                <Server className="h-5 w-5" />
                 Seus Servidores
                 {filteredAndSortedPanels.length > 0 && (
                   <Badge variant="secondary" className="ml-2">
@@ -561,7 +561,7 @@ export default function ServersPage() {
                       Renovação {sortBy === 'renewal' && (sortOrder === 'asc' ? '↑' : '↓')}
                     </TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Sigma IPTV</TableHead>
+                    <TableHead>Qpanel/Sigma</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -569,7 +569,7 @@ export default function ServersPage() {
                   {filteredAndSortedPanels.map(panel => {
                     const activeClients = getActiveClientsForPanel(panel.id);
                     const monthlyCost = calculatePanelCost(panel);
-                    const expiringSoon = isExpiringSoon(panel.renewalDate);
+                    const expiringSoon = panel.renewal_date ? isExpiringSoon(panel.renewal_date) : false;
 
                     return (
                       <TableRow key={panel.id} className="hover:bg-muted/50">
@@ -597,12 +597,12 @@ export default function ServersPage() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">
-                            {panel.costType === 'fixed' ? 'Fixo' : 'Por Cliente'}
+                            {true /* monthly_cost is number */ ? 'Fixo' : 'Por Cliente'}
                           </Badge>
                         </TableCell>
                         <TableCell>
                           <div className="text-sm">
-                            {new Date(panel.renewalDate).toLocaleDateString('pt-BR')}
+                            {panel.renewal_date ? new Date(panel.renewal_date + 'T00:00:00').toLocaleDateString('pt-BR') : 'Não definida'}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -615,7 +615,7 @@ export default function ServersPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            {panel.sigmaConnected ? (
+                            {panel.sigma_connected ? (
                               <>
                                 <Wifi className="h-4 w-4 text-green-500" />
                                 <Badge variant="secondary" className="text-green-700 bg-green-50">
@@ -668,7 +668,7 @@ export default function ServersPage() {
               {filteredAndSortedPanels.map((panel) => {
                 const activeClients = getActiveClientsForPanel(panel.id);
                 const monthlyCost = calculatePanelCost(panel);
-                const expiringSoon = isExpiringSoon(panel.renewalDate);
+                const expiringSoon = panel.renewal_date ? isExpiringSoon(panel.renewal_date) : false;
 
                 return (
                   <Card key={panel.id} className="border-0 shadow-lg hover:shadow-xl transition-all duration-300">
@@ -716,14 +716,14 @@ export default function ServersPage() {
                       {/* Renewal Date */}
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Renovação</p>
-                        <p className="text-sm">{new Date(panel.renewalDate).toLocaleDateString('pt-BR')}</p>
+                        <p className="text-sm">{panel.renewal_date ? new Date(panel.renewal_date + 'T00:00:00').toLocaleDateString('pt-BR') : 'Não definida'}</p>
                       </div>
 
                       {/* Cost Type */}
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-muted-foreground">Tipo de Cobrança</p>
                         <Badge variant="outline">
-                          {panel.costType === 'fixed' ? 'Valor Fixo' : 'Por Cliente Ativo'}
+                          {true /* monthly_cost is number */ ? 'Valor Fixo' : 'Por Cliente Ativo'}
                         </Badge>
                       </div>
 
@@ -813,7 +813,7 @@ export default function ServersPage() {
 
             <div className="space-y-2">
               <Label>Tipo de Cobrança</Label>
-              <Select value={costType} onValueChange={(value: "fixed" | "perActive") => setCostType(value)}>
+              <Select value={"fixed"} onValueChange={() => {}}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -824,7 +824,7 @@ export default function ServersPage() {
               </Select>
             </div>
 
-            {costType === 'fixed' ? (
+            {true ? (
               <div className="space-y-2">
                 <Label htmlFor="monthlyCost">Custo Mensal (R$)</Label>
                 <Input
@@ -850,7 +850,7 @@ export default function ServersPage() {
               </div>
             )}
 
-            {/* Sigma IPTV Integration Section */}
+            {/* Qpanel/Sigma Integration Section */}
             <div className="border-t pt-4 space-y-4">
               <div className="flex items-center gap-2">
                 <Server className="h-5 w-5 text-blue-600" />
@@ -1018,7 +1018,7 @@ export default function ServersPage() {
 
             <div className="space-y-2">
               <Label>Tipo de Cobrança</Label>
-              <Select value={costType} onValueChange={(value: "fixed" | "perActive") => setCostType(value)}>
+              <Select value={"fixed"} onValueChange={() => {}}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -1029,7 +1029,7 @@ export default function ServersPage() {
               </Select>
             </div>
 
-            {costType === 'fixed' ? (
+            {true ? (
               <div className="space-y-2">
                 <Label htmlFor="edit-monthlyCost">Custo Mensal (R$)</Label>
                 <Input
@@ -1099,19 +1099,31 @@ export default function ServersPage() {
                       id="edit-sigmaUsername"
                       value={sigmaUsername}
                       onChange={(e) => setSigmaUsername(e.target.value)}
-                      placeholder={connectionStatus.success ? "Usuário já configurado" : "Username do revenda"}
+                      placeholder={editingPanel?.sigma_username ? "Usuário já cadastrado - digite para substituir" : "Username do revenda"}
+                      className="font-mono"
                     />
+                    {editingPanel?.sigma_username && (
+                      <p className="text-xs text-muted-foreground">
+                        🔒 Usuário salvo com segurança. Digite um novo valor para substituir.
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="edit-sigmaToken">Token</Label>
                     <Input
                       id="edit-sigmaToken"
-                      type="text"
+                      type="password"
                       value={sigmaToken}
                       onChange={(e) => setSigmaToken(e.target.value)}
-                      placeholder={connectionStatus.success ? "Token já configurado" : "Token de integração do Sigma"}
+                      placeholder={editingPanel?.sigma_token ? "Token já cadastrado - digite para substituir" : "Token de integração do Sigma"}
+                      className="font-mono"
                     />
+                    {editingPanel?.sigma_token && (
+                      <p className="text-xs text-muted-foreground">
+                        🔒 Token salvo com segurança. Digite um novo valor para substituir.
+                      </p>
+                    )}
                   </div>
 
               {/* Test Connection Button */}
@@ -1180,3 +1192,10 @@ export default function ServersPage() {
     </div>
   );
 }
+
+
+
+
+
+
+

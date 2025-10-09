@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react';
 import type { Panel } from '@/lib/definitions';
+import { useClients } from '@/hooks/use-clients';
+import { usePanels } from '@/hooks/use-panels';
+import { mysqlApi } from '@/lib/mysql-api-client';
 
 interface SigmaConfig {
   url: string;
@@ -35,7 +38,7 @@ export function useSigmaIntegration() {
       });
 
       const result = await response.json();
-      
+
       if (!result.success) {
         setError(result.error);
         return { success: false, error: result.error };
@@ -63,7 +66,7 @@ export function useSigmaIntegration() {
       });
 
       const result = await response.json();
-      
+
       if (!result.success) {
         setError(result.error);
         return { success: false, error: result.error };
@@ -84,7 +87,7 @@ export function useSigmaIntegration() {
     action: 'create' | 'renew' | 'status' | 'delete' | 'get',
     clientData: SigmaClientData
   ) => {
-    if (!panel.sigmaConnected || !panel.sigmaUrl || !panel.sigmaUsername || !panel.sigmaToken) {
+    if (!panel.sigma_connected || !panel.sigma_url || !panel.sigma_username || !panel.sigma_token) {
       const errorMessage = 'Painel não está conectado ao Sigma IPTV';
       setError(errorMessage);
       return { success: false, error: errorMessage };
@@ -95,10 +98,10 @@ export function useSigmaIntegration() {
 
     try {
       const sigmaConfig = {
-        url: panel.sigmaUrl,
-        username: panel.sigmaUsername,
-        token: panel.sigmaToken,
-        userId: panel.sigmaUserId
+        url: panel.sigma_url,
+        username: panel.sigma_username,
+        token: panel.sigma_token,
+        userId: panel.sigma_user_id
       };
 
       const response = await fetch('/api/sigma/sync-client', {
@@ -112,7 +115,7 @@ export function useSigmaIntegration() {
       });
 
       const result = await response.json();
-      
+
       if (!result.success) {
         setError(result.error);
         return { success: false, error: result.error };
@@ -150,12 +153,12 @@ export function useSigmaIntegration() {
 
   // Auto-sync client status based on renewal date
   const autoSyncClientStatus = useCallback(async (panel: Panel, client: any) => {
-    if (!panel.sigmaConnected || !client.username) {
+    if (!panel.sigma_connected || !client.username) {
       return { success: false, error: 'Cliente não configurado para Sigma' };
     }
 
     const today = new Date();
-    const renewalDate = new Date(client.renewalDate);
+    const renewalDate = new Date(client.renewal_date);
     const isExpired = renewalDate < today;
     const sigmaStatus = isExpired ? 'INACTIVE' : 'ACTIVE';
 
@@ -163,8 +166,8 @@ export function useSigmaIntegration() {
   }, [updateClientStatus]);
 
   // Sync client data FROM Sigma TO local database
-  const syncFromSigma = useCallback(async (client: any, panel: Panel, firestore: any, resellerId: string) => {
-    if (!panel.sigmaConnected || !client.username) {
+  const syncFromSigma = useCallback(async (client: any, panel: Panel, resellerId: string) => {
+    if (!panel.sigma_connected || !client.username) {
       return { success: false, error: 'Painel não está conectado ao Sigma ou cliente sem username' };
     }
 
@@ -173,10 +176,10 @@ export function useSigmaIntegration() {
 
     try {
       const sigmaConfig = {
-        url: panel.sigmaUrl!,
-        username: panel.sigmaUsername!,
-        token: panel.sigmaToken!,
-        userId: panel.sigmaUserId!
+        url: panel.sigma_url!,
+        username: panel.sigma_username!,
+        token: panel.sigma_token!,
+        userId: panel.sigma_user_id!
       };
 
       const response = await fetch('/api/sigma/sync-from-sigma', {
@@ -184,13 +187,13 @@ export function useSigmaIntegration() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: client.username,
-          currentRenewalDate: client.renewalDate,
+          currentRenewalDate: client.renewal_date,
           sigmaConfig
         }),
       });
 
       const result = await response.json();
-      
+
       if (!result.success) {
         setError(result.error);
         return { success: false, error: result.error };
@@ -198,14 +201,20 @@ export function useSigmaIntegration() {
 
       // If dates are different, update the local database
       if (result.updated) {
-        const { updateDocumentNonBlocking } = await import('@/firebase/non-blocking-updates');
-        const { doc } = await import('firebase/firestore');
-        
-        const clientRef = doc(firestore, 'resellers', resellerId, 'clients', client.id);
-        updateDocumentNonBlocking(clientRef, {
-          renewalDate: result.newDate,
-          lastSigmaSync: new Date().toISOString()
-        });
+        try {
+          await mysqlApi.updateClient(client.id, {
+            renewal_date: result.newDate
+          });
+          console.log(`✅ Cliente ${client.username} atualizado no banco: ${result.newDate}`);
+        } catch (updateError) {
+          console.error('Failed to update client after Sigma sync:', updateError);
+          // Don't fail the whole operation if update fails
+          return { 
+            success: true, 
+            data: result,
+            updateError: 'Não foi possível atualizar data no banco local'
+          };
+        }
       }
 
       return { success: true, data: result };

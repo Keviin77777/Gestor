@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSigmaAPI } from '@/lib/sigma-api';
+import { useClients } from '@/hooks/use-clients';
 
 export async function POST(request: NextRequest) {
   try {

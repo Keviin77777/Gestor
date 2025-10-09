@@ -10,6 +10,8 @@ import { differenceInDays, parseISO, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import type { Client, Plan } from "@/lib/definitions";
 import { useRouter } from "next/navigation";
+import { useClients } from '@/hooks/use-clients';
+import { usePlans } from '@/hooks/use-plans';
 
 interface ExpiringClientsProps {
   clients?: Client[];
@@ -29,13 +31,13 @@ export function ExpiringClients({ clients, plans }: ExpiringClientsProps) {
     return clients
       .filter(client => {
         if (client.status !== 'active') return false;
-        const renewalDate = parseISO(client.renewalDate);
+        const renewalDate = parseISO(client.renewal_date);
         return renewalDate >= today && renewalDate <= thirtyDaysFromNow;
       })
       .map(client => {
-        const renewalDate = parseISO(client.renewalDate);
+        const renewalDate = parseISO(client.renewal_date);
         const daysUntilExpiry = differenceInDays(renewalDate, today);
-        const plan = plans?.find(p => p.id === client.planId);
+        const plan = plans?.find(p => p.id === client.plan_id);
         
         return {
           ...client,
@@ -177,7 +179,7 @@ export function ExpiringClients({ clients, plans }: ExpiringClientsProps) {
                         </div>
                       )}
                       <div className="flex items-center gap-1 font-semibold text-green-600 dark:text-green-400">
-                        R$ {client.paymentValue.toFixed(2)}
+                        R$ {(client.value || 0).toFixed(2)}
                       </div>
                     </div>
 

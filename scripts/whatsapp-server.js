@@ -1,0 +1,737 @@
+#!/usr/bin/env node
+
+/**
+ * WhatsApp Server usando Baileys
+ * Implementação real do WhatsApp Web usando @whiskeysockets/baileys
+ * Compatible com Evolution API endpoints
+ */
+
+const express = require('express');
+const cors = require('cors');
+const QRCode = require('qrcode');
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const fs = require('fs');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3002;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Armazenamento de sessões WhatsApp
+const sessions = new Map();
+const qrCodes = new Map();
+
+// Logger
+const logger = pino({ level: 'error' });
+
+// Diretório para armazenar sessões
+const sessionsDir = path.join(__dirname, 'whatsapp-sessions');
+if (!fs.existsSync(sessionsDir)) {
+  fs.mkdirSync(sessionsDir, { recursive: true });
+}
+
+// Criar sessão WhatsApp real usando Baileys
+async function createWhatsAppSession(instanceName) {
+  const sessionPath = path.join(sessionsDir, instanceName);
+  
+  try {
+    console.log(`🔧 [${instanceName}] Iniciando criação de sessão...`);
+    
+    // Limpar sessão anterior se houver problemas
+    if (sessions.has(instanceName)) {
+      const oldSession = sessions.get(instanceName);
+      if (oldSession.sock) {
+        try {
+          oldSession.sock.end();
+        } catch (e) {
+          // Ignorar erros ao fechar sessão antiga
+        }
+      }
+      sessions.delete(instanceName);
+      qrCodes.delete(instanceName);
+    }
+    
+    // Usar autenticação multi-arquivo
+    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    
+    // Criar socket WhatsApp com configurações otimizadas para estabilidade
+    const sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      logger: logger,
+      browser: ['GestPlay', 'Chrome', '110.0.0.0'],
+      defaultQueryTimeoutMs: 120000, // Aumentado para 2 minutos
+      connectTimeoutMs: 120000, // Aumentado para 2 minutos
+      keepAliveIntervalMs: 25000, // Reduzido para manter conexão mais ativa
+      markOnlineOnConnect: false,
+      syncFullHistory: false,
+      generateHighQualityLinkPreview: false,
+      retryRequestDelayMs: 1000, // Aumentado delay entre tentativas
+      maxMsgRetryCount: 5, // Mais tentativas
+      emitOwnEvents: false,
+      fireInitQueries: true,
+      shouldSyncHistoryMessage: () => false,
+      shouldIgnoreJid: () => false,
+      linkPreviewImageThumbnailWidth: 192,
+      transactionOpts: {
+        maxCommitRetries: 10,
+        delayBetweenTriesMs: 3000
+      },
+      getMessage: async (key) => {
+        return undefined;
+      }
+    });
+
+    // Armazenar referência do socket
+    sessions.set(instanceName, {
+      sock,
+      connected: false,
+      instanceName,
+      status: 'connecting',
+      qrCode: null
+    });
+
+    // Event listeners
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      
+      console.log(`📱 [${instanceName}] Connection update:`, connection);
+      
+      if (qr) {
+        // Gerar QR Code real
+        try {
+          const qrCodeDataURL = await QRCode.toDataURL(qr, {
+            width: 256,
+            margin: 2,
+            color: {
+              dark: '#000000',
+              light: '#FFFFFF'
+            }
+          });
+          
+          // Armazenar QR Code
+          qrCodes.set(instanceName, {
+            qrCode: qrCodeDataURL,
+            timestamp: Date.now()
+          });
+          
+          // Atualizar status da sessão
+          const session = sessions.get(instanceName);
+          if (session) {
+            session.status = 'qr';
+            session.qrCode = qrCodeDataURL;
+          }
+          
+          console.log(`📱 [${instanceName}] QR Code gerado`);
+        } catch (error) {
+          console.error(`❌ [${instanceName}] Erro ao gerar QR Code:`, error);
+        }
+      }
+      
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        
+        console.log(`🔌 [${instanceName}] Conexão fechada. Status: ${statusCode}, Reconectar: ${shouldReconnect}`);
+        
+        // Atualizar status da sessão
+        const session = sessions.get(instanceName);
+        if (session) {
+          session.connected = false;
+          session.status = 'close';
+          session.reconnectAttempts = (session.reconnectAttempts || 0) + 1;
+        }
+        
+        // Estratégia de reconexão inteligente baseada no código de erro
+        if (statusCode === DisconnectReason.badSession || statusCode === 401) {
+          console.log(`🧹 [${instanceName}] Sessão inválida (${statusCode}) - Limpando completamente...`);
+          
+          // Limpar pasta de sessão
+          try {
+            if (fs.existsSync(sessionPath)) {
+              fs.rmSync(sessionPath, { recursive: true, force: true });
+              console.log(`🗑️ [${instanceName}] Pasta de sessão removida`);
+            }
+          } catch (e) {
+            console.log(`⚠️ [${instanceName}] Erro ao limpar pasta:`, e.message);
+          }
+          
+          sessions.delete(instanceName);
+          qrCodes.delete(instanceName);
+        } else if (statusCode === DisconnectReason.connectionClosed || statusCode === 515) {
+          // Erro de conexão - reconectar com delay progressivo
+          const attempts = session?.reconnectAttempts || 0;
+          const delay = Math.min(5000 + (attempts * 2000), 30000); // Max 30 segundos
+          
+          console.log(`⏳ [${instanceName}] Erro de conexão (${statusCode}). Tentativa ${attempts + 1}. Aguardando ${delay/1000}s...`);
+          
+          if (attempts < 10) { // Máximo 10 tentativas
+            setTimeout(() => {
+              console.log(`🔄 [${instanceName}] Tentando reconectar (tentativa ${attempts + 1})...`);
+              createWhatsAppSession(instanceName);
+            }, delay);
+          } else {
+            console.log(`❌ [${instanceName}] Muitas tentativas de reconexão. Parando...`);
+            sessions.delete(instanceName);
+            qrCodes.delete(instanceName);
+          }
+        } else if (shouldReconnect && statusCode !== DisconnectReason.loggedOut) {
+          // Outros erros - reconexão padrão
+          console.log(`⏳ [${instanceName}] Aguardando 5 segundos para reconectar...`);
+          setTimeout(() => {
+            console.log(`🔄 [${instanceName}] Tentando reconectar...`);
+            createWhatsAppSession(instanceName);
+          }, 5000);
+        } else {
+          console.log(`❌ [${instanceName}] Não reconectando (Status: ${statusCode}). Limpando sessão...`);
+          sessions.delete(instanceName);
+          qrCodes.delete(instanceName);
+        }
+      } else if (connection === 'open') {
+        console.log(`✅ [${instanceName}] WhatsApp conectado com sucesso!`);
+        
+        // Atualizar status da sessão
+        const session = sessions.get(instanceName);
+        if (session) {
+          session.connected = true;
+          session.status = 'open';
+          session.qrCode = null;
+          session.reconnectAttempts = 0; // Reset contador de tentativas
+          session.connectedAt = new Date().toISOString();
+        }
+        
+        // Remover QR Code
+        qrCodes.delete(instanceName);
+        
+        // Obter informações do usuário
+        try {
+          const user = sock.user;
+          if (user) {
+            session.phoneNumber = `+${user.id.split(':')[0]}`;
+            session.profileName = user.name || 'WhatsApp User';
+            console.log(`👤 [${instanceName}] Usuário: ${session.profileName} (${session.phoneNumber})`);
+          }
+        } catch (error) {
+          console.log(`⚠️ [${instanceName}] Erro ao obter info do usuário:`, error);
+        }
+        
+        // Implementar keep-alive para manter conexão estável
+        if (session.keepAliveInterval) {
+          clearInterval(session.keepAliveInterval);
+        }
+        
+        session.keepAliveInterval = setInterval(async () => {
+          try {
+            // Ping simples para manter conexão ativa
+            await sock.query({
+              tag: 'iq',
+              attrs: {
+                id: sock.generateMessageTag(),
+                type: 'get',
+                xmlns: 'w:p',
+                to: 's.whatsapp.net'
+              }
+            });
+            console.log(`💓 [${instanceName}] Keep-alive enviado`);
+          } catch (error) {
+            console.log(`⚠️ [${instanceName}] Erro no keep-alive:`, error.message);
+          }
+        }, 60000); // A cada 1 minuto
+      }
+    });
+
+    // Salvar credenciais quando atualizadas
+    sock.ev.on('creds.update', saveCreds);
+
+    // Monitoramento de mensagens para detectar problemas
+    sock.ev.on('messages.upsert', (m) => {
+      const session = sessions.get(instanceName);
+      if (session) {
+        session.lastMessageReceived = new Date().toISOString();
+      }
+    });
+
+    // Monitoramento de presença para detectar atividade
+    sock.ev.on('presence.update', (presence) => {
+      const session = sessions.get(instanceName);
+      if (session) {
+        session.lastPresenceUpdate = new Date().toISOString();
+      }
+    });
+
+    // Tratamento de erros não capturados
+    sock.ev.on('connection.error', (error) => {
+      console.log(`❌ [${instanceName}] Erro de conexão:`, error);
+    });
+
+    return sock;
+  } catch (error) {
+    console.error(`❌ [${instanceName}] Erro ao criar sessão:`, error);
+    throw error;
+  }
+}
+
+// Middleware de autenticação
+const authenticateApiKey = (req, res, next) => {
+  const apiKey = req.headers['apikey'] || req.headers['authorization'];
+  const expectedApiKey = 'gestplay-api-key-2024';
+  
+  if (!apiKey || apiKey !== expectedApiKey) {
+    return res.status(401).json({
+      error: 'Unauthorized',
+      message: 'Invalid API key'
+    });
+  }
+  
+  next();
+};
+
+// Aplicar autenticação em todas as rotas da API (exceto health)
+app.use('/instance', authenticateApiKey);
+app.use('/message', authenticateApiKey);
+
+// Rotas da Evolution API
+
+// Criar instância
+app.post('/instance/create', async (req, res) => {
+  const { instanceName, token, qrcode = true } = req.body;
+  
+  if (!instanceName) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'instanceName is required'
+    });
+  }
+  
+  try {
+    // Verificar se instância já existe
+    if (sessions.has(instanceName)) {
+      return res.status(409).json({
+        error: 'Conflict',
+        message: 'Instance already exists'
+      });
+    }
+    
+    console.log(`🔄 Criando instância: ${instanceName}`);
+    
+    // Criar sessão WhatsApp real
+    await createWhatsAppSession(instanceName);
+    
+    res.json({
+      instance: {
+        instanceName,
+        status: 'created'
+      },
+      hash: {
+        apikey: token
+      }
+    });
+  } catch (error) {
+    console.error('Erro ao criar instância:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error.message
+    });
+  }
+});
+
+// Conectar instância (obter QR Code)
+app.get('/instance/connect/:instanceName', async (req, res) => {
+  const { instanceName } = req.params;
+  
+  try {
+    const session = sessions.get(instanceName);
+    
+    if (!session) {
+      // Criar nova sessão se não existir
+      await createWhatsAppSession(instanceName);
+      
+      // Aguardar um pouco para o QR Code ser gerado
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    
+    const qrData = qrCodes.get(instanceName);
+    
+    if (!qrData) {
+      return res.status(202).json({
+        message: 'QR Code being generated, please wait...',
+        status: 'generating'
+      });
+    }
+    
+    res.json({
+      base64: qrData.qrCode,
+      code: qrData.qrCode,
+      count: 1
+    });
+  } catch (error) {
+    console.error('Erro ao conectar instância:', error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error.message
+    });
+  }
+});
+
+// Verificar status da conexão
+app.get('/instance/connectionState/:instanceName', (req, res) => {
+  const { instanceName } = req.params;
+  const session = sessions.get(instanceName);
+  
+  if (!session) {
+    return res.json({
+      instance: {
+        instanceName,
+        state: 'close'
+      }
+    });
+  }
+  
+  let state = 'close';
+  if (session.connected) {
+    state = 'open';
+  } else if (session.status === 'qr') {
+    state = 'qr';
+  }
+  
+  res.json({
+    instance: {
+      instanceName,
+      state: state,
+      status: session.status || 'close'
+    }
+  });
+});
+
+
+
+// Limpar sessão completamente (nova rota)
+app.post('/instance/clear/:instanceName', async (req, res) => {
+  const { instanceName } = req.params;
+  
+  try {
+    console.log(`🧹 [${instanceName}] Limpando sessão completamente...`);
+    
+    // Fechar socket se existir
+    const session = sessions.get(instanceName);
+    if (session && session.sock) {
+      try {
+        session.sock.end();
+      } catch (e) {
+        // Ignorar erros ao fechar
+      }
+    }
+    
+    // Limpar da memória
+    sessions.delete(instanceName);
+    qrCodes.delete(instanceName);
+    
+    // Limpar pasta de sessão
+    const sessionPath = path.join(sessionsDir, instanceName);
+    if (fs.existsSync(sessionPath)) {
+      fs.rmSync(sessionPath, { recursive: true, force: true });
+      console.log(`🗑️ [${instanceName}] Pasta de sessão removida`);
+    }
+    
+    res.json({
+      success: true,
+      message: 'Sessão limpa com sucesso'
+    });
+  } catch (error) {
+    console.error(`❌ [${instanceName}] Erro ao limpar sessão:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Logout da instância
+app.delete('/instance/logout/:instanceName', async (req, res) => {
+  const { instanceName } = req.params;
+  
+  try {
+    const session = sessions.get(instanceName);
+    
+    if (session && session.sock) {
+      // Fazer logout real do WhatsApp
+      await session.sock.logout();
+    }
+    
+    // Limpar dados da sessão
+    sessions.delete(instanceName);
+    qrCodes.delete(instanceName);
+    
+    // Remover arquivos de sessão
+    const sessionPath = path.join(sessionsDir, instanceName);
+    if (fs.existsSync(sessionPath)) {
+      fs.rmSync(sessionPath, { recursive: true, force: true });
+    }
+    
+    console.log(`🔌 [${instanceName}] Instância desconectada e limpa`);
+    
+    res.json({
+      error: false,
+      message: 'Instance logged out successfully'
+    });
+  } catch (error) {
+    console.error(`❌ [${instanceName}] Erro ao fazer logout:`, error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error.message
+    });
+  }
+});
+
+// Enviar mensagem de texto
+app.post('/message/sendText/:instanceName', async (req, res) => {
+  const { instanceName } = req.params;
+  const { number, text } = req.body;
+  
+  const session = sessions.get(instanceName);
+  
+  if (!session || !session.connected || !session.sock) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Instance not connected'
+    });
+  }
+  
+  // Validar dados
+  if (!number || !text) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'number and text are required'
+    });
+  }
+  
+  try {
+    // Formatar número para WhatsApp
+    const formattedNumber = number.includes('@') ? number : `${number}@s.whatsapp.net`;
+    
+    // Enviar mensagem real
+    const result = await session.sock.sendMessage(formattedNumber, { text });
+    
+    console.log(`📤 [${instanceName}] Mensagem enviada:`);
+    console.log(`   Para: ${number}`);
+    console.log(`   Texto: ${text}`);
+    console.log(`   ID: ${result.key.id}`);
+    console.log('---');
+    
+    res.json({
+      key: result.key,
+      message: {
+        conversation: text
+      },
+      messageTimestamp: result.messageTimestamp,
+      status: 'PENDING'
+    });
+  } catch (error) {
+    console.error(`❌ [${instanceName}] Erro ao enviar mensagem:`, error);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: error.message
+    });
+  }
+});
+
+// Listar instâncias
+app.get('/instance/fetchInstances', (req, res) => {
+  const instances = Array.from(sessions.entries()).map(([name, session]) => ({
+    instance: {
+      instanceName: name,
+      status: session.connected ? 'open' : 'close'
+    }
+  }));
+  
+  res.json(instances);
+});
+
+// Obter informações da instância
+app.get('/instance/:instanceName', (req, res) => {
+  const { instanceName } = req.params;
+  const session = sessions.get(instanceName);
+  
+  if (!session) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: 'Instance not found'
+    });
+  }
+  
+  res.json({
+    instance: {
+      instanceName,
+      status: session.connected ? 'open' : session.status || 'close',
+      profileName: session.profileName || 'WhatsApp User',
+      profilePictureUrl: session.profilePictureUrl || null,
+      phoneNumber: session.phoneNumber || null,
+      integration: 'WHATSAPP-BAILEYS'
+    }
+  });
+});
+
+// Webhook para eventos (simulado)
+app.post('/webhook/:instanceName', (req, res) => {
+  const { instanceName } = req.params;
+  const event = req.body;
+  
+  console.log(`📡 Webhook recebido para ${instanceName}:`, event);
+  
+  res.json({ 
+    error: false,
+    message: 'Webhook received successfully' 
+  });
+});
+
+// Rota de saúde detalhada
+app.get('/health', (req, res) => {
+  const healthData = {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    sessions: {
+      total: sessions.size,
+      connected: 0,
+      connecting: 0,
+      disconnected: 0,
+      details: []
+    }
+  };
+
+  // Analisar status das sessões
+  sessions.forEach((session, instanceName) => {
+    const sessionInfo = {
+      instanceName,
+      status: session.status,
+      connected: session.connected,
+      connectedAt: session.connectedAt,
+      reconnectAttempts: session.reconnectAttempts || 0,
+      lastMessageReceived: session.lastMessageReceived,
+      lastPresenceUpdate: session.lastPresenceUpdate,
+      phoneNumber: session.phoneNumber,
+      profileName: session.profileName
+    };
+
+    healthData.sessions.details.push(sessionInfo);
+
+    if (session.connected) {
+      healthData.sessions.connected++;
+    } else if (session.status === 'connecting' || session.status === 'qr') {
+      healthData.sessions.connecting++;
+    } else {
+      healthData.sessions.disconnected++;
+    }
+  });
+
+  res.json(healthData);
+});
+
+// Rota de health check simples
+app.get('/ping', (req, res) => {
+  res.json({ 
+    status: 'pong',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Middleware de erro
+app.use((error, req, res, next) => {
+  console.error('Erro na API:', error);
+  res.status(500).json({
+    success: false,
+    error: 'Erro interno do servidor'
+  });
+});
+
+// Iniciar servidor
+app.listen(PORT, () => {
+  console.log(`🚀 Evolution API Compatible Server rodando na porta ${PORT}`);
+  console.log(`📱 Health Check: http://localhost:${PORT}/health`);
+  console.log(`🔑 API Key: gestplay-evolution-api-key-2024`);
+  console.log('');
+  console.log('📋 Endpoints Evolution API:');
+  console.log(`   POST /instance/create                    - Criar instância`);
+  console.log(`   GET  /instance/connect/:instanceName     - Conectar (QR Code)`);
+  console.log(`   GET  /instance/connectionState/:instanceName - Status`);
+  console.log(`   DELETE /instance/logout/:instanceName    - Desconectar`);
+  console.log(`   POST /message/sendText/:instanceName     - Enviar mensagem`);
+  console.log(`   GET  /instance/fetchInstances            - Listar instâncias`);
+  console.log('');
+  console.log('🔧 Configuração GestPlay:');
+  console.log(`   NEXT_PUBLIC_WHATSAPP_API_URL=http://localhost:${PORT}`);
+  console.log(`   NEXT_PUBLIC_WHATSAPP_API_KEY=gestplay-evolution-api-key-2024`);
+  console.log('');
+  console.log('✅ Servidor pronto para uso com GestPlay!');
+});
+
+// Limpeza automática de sessões órfãs
+setInterval(() => {
+  const now = Date.now();
+  const maxInactiveTime = 10 * 60 * 1000; // 10 minutos
+
+  sessions.forEach((session, instanceName) => {
+    if (!session.connected && session.status === 'close') {
+      const lastActivity = session.lastMessageReceived || session.connectedAt;
+      if (lastActivity) {
+        const inactiveTime = now - new Date(lastActivity).getTime();
+        if (inactiveTime > maxInactiveTime) {
+          console.log(`🧹 [${instanceName}] Limpando sessão inativa há ${Math.round(inactiveTime/60000)} minutos`);
+          
+          // Limpar keep-alive se existir
+          if (session.keepAliveInterval) {
+            clearInterval(session.keepAliveInterval);
+          }
+          
+          // Fechar socket se existir
+          if (session.sock) {
+            try {
+              session.sock.end();
+            } catch (e) {
+              // Ignorar erros
+            }
+          }
+          
+          sessions.delete(instanceName);
+          qrCodes.delete(instanceName);
+        }
+      }
+    }
+  });
+}, 5 * 60 * 1000); // Verificar a cada 5 minutos
+
+// Graceful shutdown
+const gracefulShutdown = () => {
+  console.log('🔄 Encerrando servidor graciosamente...');
+  
+  // Fechar todas as sessões
+  sessions.forEach((session, instanceName) => {
+    console.log(`🔌 [${instanceName}] Fechando sessão...`);
+    
+    if (session.keepAliveInterval) {
+      clearInterval(session.keepAliveInterval);
+    }
+    
+    if (session.sock) {
+      try {
+        session.sock.end();
+      } catch (e) {
+        // Ignorar erros
+      }
+    }
+  });
+  
+  sessions.clear();
+  qrCodes.clear();
+  
+  console.log('✅ Servidor encerrado com sucesso');
+  process.exit(0);
+};
+
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);
