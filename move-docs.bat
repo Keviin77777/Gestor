@@ -1,0 +1,15 @@
+@echo off
+move RENOVACAO_AUTOMATICA_SIGMA.md docs\
+move DEBUG_SIGMA_WEBHOOK.md docs\
+move CONFIGURACAO_EMAIL_COMPLETA.md docs\
+move CONFIGURAR_EMAIL_PRODUCAO.md docs\
+move CRIAR_TEMPLATES_WHATSAPP.md docs\
+move DEPLOY_PRODUCAO_COMPLETO.md docs\
+move GUIA_NGROK_WEBHOOK.md docs\
+move GUIA_RAPIDO_EVOLUTION.md docs\
+move LANDING_PAGE_PLANOS_DINAMICOS.md docs\
+move MELHORIAS_AUTH_PAGES.md docs\
+move ROTAS_API_CRIADAS.md docs\
+move SUPORTE_ICONS_IMPLEMENTACAO.md docs\
+move TESTE_RECUPERACAO_SENHA.md docs\
+echo Documentos movidos para docs\

@@ -5,6 +5,9 @@
  * Roda independente do frontend, processando faturas 24/7
  */
 
+// Carregar variáveis de ambiente do arquivo .env (na pasta pai)
+require('dotenv').config({ path: '../.env' });
+
 const mysql = require('mysql2/promise');
 const fetch = require('node-fetch');
 
@@ -23,7 +26,6 @@ const DB_CONFIG = {
 // Configuração do WhatsApp
 const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || 'http://localhost:3002';
 const WHATSAPP_API_KEY = process.env.WHATSAPP_API_KEY || 'gestplay-api-key-2024';
-const WHATSAPP_INSTANCE = process.env.WHATSAPP_INSTANCE || 'gestplay-instance';
 
 // Configuração
 const DAYS_BEFORE_EXPIRY = parseInt(process.env.INVOICE_DAYS_BEFORE || '10');
@@ -94,7 +96,7 @@ function formatPhone(phone) {
 /**
  * Processar variáveis na mensagem
  */
-function processMessageVariables(message, client, dueDate, value, planName) {
+function processMessageVariables(message, client, dueDate, value, planName, paymentLink = null) {
   let processed = message;
 
   // Formatar data
@@ -115,6 +117,11 @@ function processMessageVariables(message, client, dueDate, value, planName) {
     'plano': planName || 'Plano',
     'PLAN_NAME': planName || 'Plano',
     'plano_nome': planName || 'Plano',
+    'referencia': planName || 'Plano',
+    'REFERENCIA': planName || 'Plano',
+    'link_fatura': paymentLink || 'Link não disponível',
+    'link_pagamento': paymentLink || 'Link não disponível',
+    'PAYMENT_LINK': paymentLink || 'Link não disponível',
   };
 
   // Substituir variáveis (suporta {{var}} e {var})
@@ -128,9 +135,149 @@ function processMessageVariables(message, client, dueDate, value, planName) {
 }
 
 /**
- * Enviar mensagem via WhatsApp
+ * Gerar link de pagamento do Mercado Pago
  */
-async function sendWhatsAppMessage(phone, message) {
+async function generatePaymentLink(invoiceId, resellerId, clientId, value, description) {
+  try {
+    console.log(`      🔍 Buscando método de pagamento para reseller: ${resellerId}`);
+    
+    // Buscar método de pagamento padrão ativo
+    const [paymentMethods] = await pool.query(
+      `SELECT * FROM payment_methods 
+       WHERE reseller_id = ? AND is_active = 1 AND is_default = 1
+       LIMIT 1`,
+      [resellerId]
+    );
+
+    console.log(`      📋 Métodos encontrados: ${paymentMethods.length}`);
+
+    if (paymentMethods.length === 0) {
+      console.log(`      ⚠️  Nenhum método de pagamento configurado para reseller ${resellerId}`);
+      return null;
+    }
+
+    const paymentMethod = paymentMethods[0];
+    console.log(`      🔧 Método encontrado: ${paymentMethod.method_type}`);
+
+    if (paymentMethod.method_type !== 'mercadopago') {
+      console.log(`      ⚠️  Método de pagamento não é Mercado Pago: ${paymentMethod.method_type}`);
+      return null;
+    }
+
+    // Buscar dados do cliente
+    const [clients] = await pool.query(
+      `SELECT name, email FROM clients WHERE id = ? LIMIT 1`,
+      [clientId]
+    );
+
+    if (clients.length === 0) {
+      return null;
+    }
+
+    const client = clients[0];
+    const clientEmail = client.email || 'cliente@exemplo.com';
+    const clientName = client.name || 'Cliente';
+
+    // Preparar dados para Mercado Pago
+    const appUrl = process.env.APP_URL || 'http://localhost:9002';
+    const mpData = {
+      transaction_amount: parseFloat(value),
+      description: description,
+      payment_method_id: 'pix',
+      payer: {
+        email: clientEmail,
+        first_name: clientName,
+      },
+      external_reference: invoiceId
+    };
+
+    // Não adicionar notification_url em localhost
+    if (!appUrl.includes('localhost') && !appUrl.includes('127.0.0.1')) {
+      mpData.notification_url = `${appUrl}/api/webhooks/mercadopago`;
+    }
+
+    // Gerar chave de idempotência
+    const idempotencyKey = `mp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+    console.log(`      🌐 Fazendo requisição ao Mercado Pago...`);
+    console.log(`      💰 Valor: R$ ${value}`);
+    
+    // Fazer requisição ao Mercado Pago
+    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${paymentMethod.mp_access_token}`,
+        'X-Idempotency-Key': idempotencyKey
+      },
+      body: JSON.stringify(mpData)
+    });
+
+    console.log(`      📡 Status da resposta: ${response.status}`);
+
+    if (response.status === 201) {
+      const mpResponse = await response.json();
+      const paymentLink = mpResponse.point_of_interaction?.transaction_data?.ticket_url;
+      const externalId = mpResponse.id;
+      const qrCode = mpResponse.point_of_interaction?.transaction_data?.qr_code_base64;
+      const pixCode = mpResponse.point_of_interaction?.transaction_data?.qr_code;
+
+      if (paymentLink) {
+        // Salvar transação
+        const transactionId = `txn_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        await pool.query(
+          `INSERT INTO payment_transactions 
+           (id, reseller_id, invoice_id, payment_method_id, method_type, external_id, payment_link, qr_code, pix_code, status, amount, expires_at, created_at)
+           VALUES (?, ?, ?, ?, 'mercadopago', ?, ?, ?, ?, 'pending', ?, DATE_ADD(NOW(), INTERVAL 24 HOUR), NOW())`,
+          [transactionId, resellerId, invoiceId, paymentMethod.id, externalId, paymentLink, qrCode, pixCode, value]
+        );
+
+        // Usar nosso checkout personalizado (apenas PIX)
+        const customCheckoutLink = `${appUrl}/checkout/pix/${transactionId}`;
+
+        // Atualizar fatura com link personalizado
+        await pool.query(
+          `UPDATE invoices SET payment_link = ?, payment_method_id = ? WHERE id = ?`,
+          [customCheckoutLink, paymentMethod.id, invoiceId]
+        );
+
+        console.log(`      ✅ Link de pagamento gerado: ${customCheckoutLink}`);
+        return customCheckoutLink;
+      }
+    } else {
+      const errorText = await response.text();
+      console.error(`      ❌ Erro Mercado Pago (${response.status}): ${errorText.substring(0, 200)}`);
+    }
+
+    return null;
+  } catch (error) {
+    console.error(`      ❌ Erro ao gerar link de pagamento: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Extrair ID numérico do reseller_id
+ */
+function extractNumericId(resellerId) {
+  // Se já começa com "reseller_", remover
+  let cleanId = resellerId.startsWith('reseller_') 
+    ? resellerId.replace('reseller_', '') 
+    : resellerId;
+  
+  // Extrair apenas números do início (antes de qualquer underscore ou caractere não numérico)
+  const numericMatch = cleanId.match(/^(\d+)/);
+  if (numericMatch) {
+    return numericMatch[1];
+  }
+  
+  return cleanId;
+}
+
+/**
+ * Enviar mensagem via WhatsApp usando instância da revenda
+ */
+async function sendWhatsAppMessage(phone, message, resellerId) {
   try {
     const formattedPhone = formatPhone(phone);
 
@@ -138,8 +285,14 @@ async function sendWhatsAppMessage(phone, message) {
       throw new Error('Telefone inválido');
     }
 
+    // Extrair ID numérico e criar nome da instância
+    const numericId = extractNumericId(resellerId);
+    const instanceName = `reseller_${numericId}`;
+    
+    console.log(`      🔧 Usando instância: ${instanceName} (de ${resellerId})`);
+
     const response = await fetch(
-      `${WHATSAPP_API_URL}/message/sendText/${WHATSAPP_INSTANCE}`,
+      `${WHATSAPP_API_URL}/message/sendText/${instanceName}`,
       {
         method: 'POST',
         headers: {
@@ -221,7 +374,7 @@ async function processInvoices() {
   try {
     // Buscar resellers ativos
     const [resellers] = await pool.query(
-      `SELECT id, email, display_name 
+      `SELECT id, email, display_name, is_admin, subscription_expiry_date, account_status 
        FROM resellers 
        WHERE is_active = 1`
     );
@@ -240,6 +393,24 @@ async function processInvoices() {
 
     for (const reseller of resellers) {
       const resellerId = reseller.id;
+
+      // ✅ VERIFICAR ASSINATURA DO RESELLER
+      // Admin sempre tem acesso
+      if (!reseller.is_admin) {
+        // Verificar se a assinatura está ativa
+        const expiryDate = reseller.subscription_expiry_date;
+        const today = new Date().toISOString().split('T')[0];
+
+        if (!expiryDate || expiryDate < today) {
+          console.log(`🚫 Reseller ${resellerId} (${reseller.email}): Assinatura expirada (${expiryDate || 'sem data'}), pulando processamento`);
+          continue;
+        }
+
+        if (reseller.account_status !== 'active' && reseller.account_status !== 'trial') {
+          console.log(`🚫 Reseller ${resellerId} (${reseller.email}): Conta inativa (${reseller.account_status}), pulando processamento`);
+          continue;
+        }
+      }
 
       // Buscar clientes ativos que precisam de fatura
       const [clients] = await pool.query(
@@ -293,34 +464,87 @@ async function processInvoices() {
 
           // Criar fatura
           const invoiceId = `inv_auto_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-          const issueDate = new Date().toISOString().split('T')[0];
-          const discount = 0;
-          const finalValue = value - discount;
+          const invoiceDate = new Date().toISOString().split('T')[0];
+          const finalValue = value; // Sem desconto por padrão
+          
+          // Gerar número sequencial da fatura com retry em caso de duplicata
+          let invoiceNumber;
+          let invoiceInserted = false;
+          let retryCount = 0;
+          const maxRetries = 5;
+          
+          while (!invoiceInserted && retryCount < maxRetries) {
+            try {
+              // Buscar o maior número existente
+              const [lastInvoice] = await pool.query(
+                `SELECT MAX(CAST(invoice_number AS UNSIGNED)) as max_number 
+                 FROM invoices 
+                 WHERE reseller_id = ? AND invoice_number REGEXP '^[0-9]+$'`,
+                [resellerId]
+              );
+              
+              if (lastInvoice.length > 0 && lastInvoice[0].max_number) {
+                const lastNumber = parseInt(lastInvoice[0].max_number) || 0;
+                invoiceNumber = String(lastNumber + 1).padStart(6, '0');
+              } else {
+                invoiceNumber = '000001';
+              }
+              
+              console.log(`   📄 Tentativa ${retryCount + 1}: Número da fatura: ${invoiceNumber}`);
 
-          await pool.query(
-            `INSERT INTO invoices 
-             (id, reseller_id, client_id, issue_date, due_date, value, discount, final_value, status, description, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())`,
-            [invoiceId, resellerId, clientId, issueDate, renewalDate, value, discount, finalValue, description]
-          );
+              // Tentar inserir
+              await pool.query(
+                `INSERT INTO invoices 
+                 (id, reseller_id, client_id, invoice_number, date, due_date, value, final_value, status, notes, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())`,
+                [invoiceId, resellerId, clientId, invoiceNumber, invoiceDate, renewalDate, value, finalValue, description]
+              );
+              
+              invoiceInserted = true;
+            } catch (insertError) {
+              if (insertError.code === 'ER_DUP_ENTRY' && retryCount < maxRetries - 1) {
+                console.log(`   ⚠️  Número ${invoiceNumber} já existe, tentando próximo...`);
+                retryCount++;
+                // Pequeno delay antes de tentar novamente
+                await new Promise(resolve => setTimeout(resolve, 100));
+              } else {
+                throw insertError;
+              }
+            }
+          }
+          
+          if (!invoiceInserted) {
+            throw new Error('Não foi possível gerar número único de fatura após múltiplas tentativas');
+          }
 
           console.log(`   ✅ ${clientName}: Fatura gerada (Vencimento: ${renewalDate}, Valor: R$ ${value})`);
           totalGenerated++;
 
+          // Gerar link de pagamento
+          console.log(`      💳 Gerando link de pagamento...`);
+          const paymentLink = await generatePaymentLink(invoiceId, resellerId, clientId, value, description);
+          console.log(`      🔗 Link gerado: ${paymentLink || 'NULL - Nenhum link foi gerado'}`);
+
           // Enviar WhatsApp se cliente tem telefone
           if (client.phone) {
+            console.log(`      📞 Cliente tem telefone: ${client.phone}`);
+            
             // Verificar se já enviou WhatsApp para esta fatura
             const hasWhatsAppLog = await checkExistingWhatsAppLog(invoiceId);
+            console.log(`      📋 Já enviou WhatsApp? ${hasWhatsAppLog ? 'SIM' : 'NÃO'}`);
 
             if (!hasWhatsAppLog) {
               // Buscar template de fatura
+              console.log(`      🔍 Buscando template para reseller: ${resellerId}`);
               const [templates] = await pool.query(
                 `SELECT message 
-                 FROM whatsapp_reminder_templates 
-                 WHERE reseller_id = ? AND type = 'invoice' AND is_active = 1 
+                 FROM whatsapp_templates 
+                 WHERE reseller_id = ? AND trigger_event = 'invoice_generated' AND is_active = 1 
                  LIMIT 1`,
                 [resellerId]
               );
+
+              console.log(`      📝 Templates encontrados: ${templates.length}`);
 
               if (templates.length > 0) {
                 const template = templates[0];
@@ -329,10 +553,11 @@ async function processInvoices() {
                   client,
                   renewalDate,
                   value,
-                  planName
+                  planName,
+                  paymentLink
                 );
 
-                const result = await sendWhatsAppMessage(client.phone, message);
+                const result = await sendWhatsAppMessage(client.phone, message, resellerId);
 
                 if (result.success) {
                   await createWhatsAppLog(invoiceId, clientId, resellerId, formatPhone(client.phone), message, 'sent');
@@ -347,9 +572,13 @@ async function processInvoices() {
                 // Pequeno delay entre envios
                 await new Promise(resolve => setTimeout(resolve, 1000));
               } else {
-                console.log(`      ⚠️  Nenhum template de fatura encontrado`);
+                console.log(`      ⚠️  Nenhum template de fatura encontrado para reseller ${resellerId}`);
               }
+            } else {
+              console.log(`      ⏭️  WhatsApp já foi enviado para esta fatura`);
             }
+          } else {
+            console.log(`      ⚠️  Cliente não tem telefone cadastrado`);
           }
 
         } catch (error) {

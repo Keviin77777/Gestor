@@ -5,6 +5,9 @@
  * Roda independente do frontend, processando lembretes 24/7
  */
 
+// Carregar variáveis de ambiente do arquivo .env (na pasta pai)
+require('dotenv').config({ path: '../.env' });
+
 const mysql = require('mysql2/promise');
 const fetch = require('node-fetch');
 
@@ -23,7 +26,6 @@ const DB_CONFIG = {
 // Configuração do WhatsApp
 const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL || 'http://localhost:3002';
 const WHATSAPP_API_KEY = process.env.WHATSAPP_API_KEY || 'gestplay-api-key-2024';
-const WHATSAPP_INSTANCE = process.env.WHATSAPP_INSTANCE || 'gestplay-instance';
 
 // Pool de conexões
 let pool;
@@ -36,6 +38,9 @@ const stats = {
   lastProcessTime: null,
   startTime: new Date()
 };
+
+// Cache de status de conexão para detectar mudanças
+const connectionStatusCache = new Map();
 
 /**
  * Inicializar pool de conexões
@@ -92,7 +97,15 @@ function processMessageVariables(message, client, daysUntilDue, additionalData =
   let processed = message;
 
   // Preparar dados
-  const renewalDate = new Date(client.renewal_date);
+  // Parsear data como local (não UTC) para evitar problemas de timezone
+  let renewalDate;
+  if (typeof client.renewal_date === 'string') {
+    const [year, month, day] = client.renewal_date.split('-').map(Number);
+    renewalDate = new Date(year, month - 1, day); // month - 1 porque JS usa 0-11
+  } else {
+    // Já é um objeto Date do MySQL
+    renewalDate = new Date(client.renewal_date);
+  }
   const now = new Date();
   const clientValue = parseFloat(client.value) || 0;
   const discountValue = parseFloat(additionalData.discountValue) || 0;
@@ -163,6 +176,11 @@ function processMessageVariables(message, client, daysUntilDue, additionalData =
     'CLIENT_STATUS': statusCliente,
     'BUSINESS_NAME': 'GestPlay',
     'empresa_nome': 'GestPlay',
+    
+    // Link de pagamento
+    'link_pagamento': additionalData.paymentLink || 'Link não disponível',
+    'link_fatura': additionalData.paymentLink || 'Link não disponível',
+    'PAYMENT_LINK': additionalData.paymentLink || 'Link não disponível',
   };
 
   // Substituir todas as variáveis (suporta {var} e {{var}})
@@ -177,9 +195,66 @@ function processMessageVariables(message, client, daysUntilDue, additionalData =
 }
 
 /**
- * Enviar mensagem via WhatsApp
+ * Extrair ID numérico do reseller_id
  */
-async function sendWhatsAppMessage(phone, message) {
+function extractNumericId(resellerId) {
+  // Se já começa com "reseller_", remover
+  let cleanId = resellerId.startsWith('reseller_') 
+    ? resellerId.replace('reseller_', '') 
+    : resellerId;
+  
+  // Extrair apenas números do início (antes de qualquer underscore ou caractere não numérico)
+  const numericMatch = cleanId.match(/^(\d+)/);
+  if (numericMatch) {
+    return numericMatch[1];
+  }
+  
+  return cleanId;
+}
+
+/**
+ * Verificar se a instância WhatsApp está conectada
+ */
+async function checkWhatsAppConnection(resellerId) {
+  try {
+    const numericId = extractNumericId(resellerId);
+    const instanceName = `reseller_${numericId}`;
+    
+    const response = await fetch(
+      `${WHATSAPP_API_URL}/instance/connectionState/${instanceName}`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': WHATSAPP_API_KEY,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      return { connected: false, error: `API error: ${response.status}` };
+    }
+
+    const result = await response.json();
+    const isConnected = result?.instance?.state === 'open';
+    
+    return {
+      connected: isConnected,
+      state: result?.instance?.state || 'unknown',
+      instanceName: instanceName
+    };
+  } catch (error) {
+    return {
+      connected: false,
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Enviar mensagem via WhatsApp usando instância da revenda
+ */
+async function sendWhatsAppMessage(phone, message, resellerId) {
   try {
     const formattedPhone = formatPhone(phone);
 
@@ -187,8 +262,14 @@ async function sendWhatsAppMessage(phone, message) {
       throw new Error('Telefone inválido');
     }
 
+    // Extrair ID numérico e criar nome da instância
+    const numericId = extractNumericId(resellerId);
+    const instanceName = `reseller_${numericId}`;
+    
+    console.log(`      🔧 Usando instância: ${instanceName} (de ${resellerId})`);
+
     const response = await fetch(
-      `${WHATSAPP_API_URL}/message/sendText/${WHATSAPP_INSTANCE}`,
+      `${WHATSAPP_API_URL}/message/sendText/${instanceName}`,
       {
         method: 'POST',
         headers: {
@@ -226,7 +307,7 @@ async function sendWhatsAppMessage(phone, message) {
 async function checkExistingLog(clientId, templateId) {
   try {
     const [rows] = await pool.query(
-      `SELECT id FROM whatsapp_reminder_logs 
+      `SELECT id, status FROM whatsapp_reminder_logs 
        WHERE client_id = ? 
        AND template_id = ? 
        AND DATE(created_at) = CURDATE()
@@ -234,10 +315,80 @@ async function checkExistingLog(clientId, templateId) {
       [clientId, templateId]
     );
 
-    return rows.length > 0;
+    if (rows.length === 0) {
+      return false;
+    }
+
+    // Se existe um log com status 'sent', já foi enviado
+    // Se existe um log com status 'pending' ou 'failed', ainda pode tentar enviar
+    const log = rows[0];
+    return log.status === 'sent';
   } catch (error) {
     console.error('Erro ao verificar log existente:', error);
     return false;
+  }
+}
+
+/**
+ * Reprocessar lembretes pendentes quando WhatsApp conectar
+ */
+async function reprocessPendingReminders(resellerId) {
+  try {
+    console.log(`🔄 [${resellerId}] Verificando lembretes pendentes...`);
+
+    // Buscar logs pendentes ou falhados de hoje
+    const [pendingLogs] = await pool.query(
+      `SELECT wrl.*, c.name as client_name, c.phone, wt.name as template_name, wt.message
+       FROM whatsapp_reminder_logs wrl
+       JOIN clients c ON wrl.client_id = c.id
+       JOIN whatsapp_templates wt ON wrl.template_id = wt.id
+       WHERE wrl.reseller_id = ? 
+       AND wrl.status IN ('pending', 'failed')
+       AND DATE(wrl.created_at) = CURDATE()
+       AND wrl.retry_count < 3
+       ORDER BY wrl.created_at ASC`,
+      [resellerId]
+    );
+
+    if (pendingLogs.length === 0) {
+      console.log(`   ✅ Nenhum lembrete pendente para reprocessar`);
+      return;
+    }
+
+    console.log(`   📋 Encontrados ${pendingLogs.length} lembretes pendentes para reprocessar`);
+
+    let reprocessed = 0;
+    let failed = 0;
+
+    for (const log of pendingLogs) {
+      console.log(`   📤 Reenviando: ${log.client_name} - ${log.template_name}`);
+
+      // Tentar enviar novamente
+      const result = await sendWhatsAppMessage(log.phone, log.message_content, resellerId);
+
+      if (result.success) {
+        await updateLogStatus(log.id, 'sent', null, result.messageId);
+        console.log(`   ✅ Reenviado com sucesso para ${log.client_name}`);
+        reprocessed++;
+      } else {
+        // Incrementar contador de tentativas
+        await pool.query(
+          `UPDATE whatsapp_reminder_logs 
+           SET retry_count = retry_count + 1, error_message = ?, updated_at = NOW()
+           WHERE id = ?`,
+          [result.error, log.id]
+        );
+        console.log(`   ❌ Falha ao reenviar para ${log.client_name}: ${result.error}`);
+        failed++;
+      }
+
+      // Pequeno delay entre reenvios
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    console.log(`   📊 Reprocessamento concluído: ${reprocessed} enviados, ${failed} falharam`);
+  } catch (error) {
+    console.error(`❌ Erro ao reprocessar lembretes pendentes:`, error);
   }
 }
 
@@ -320,6 +471,126 @@ function isWorkingDay(settings, date = new Date()) {
 }
 
 /**
+ * Verificar e criar lembretes perdidos (que deveriam ter sido enviados hoje mas não foram)
+ */
+async function checkMissedReminders() {
+  try {
+    console.log(`\n🔍 [${new Date().toLocaleString()}] Verificando lembretes perdidos...`);
+
+    // Buscar resellers ativos
+    const [resellers] = await pool.query(
+      `SELECT DISTINCT reseller_id FROM whatsapp_reminder_settings WHERE is_enabled = 1`
+    );
+
+    for (const reseller of resellers) {
+      const resellerId = reseller.reseller_id;
+
+      // Verificar se WhatsApp está conectado
+      const connectionStatus = await checkWhatsAppConnection(resellerId);
+      if (!connectionStatus.connected) {
+        continue;
+      }
+
+      // Buscar templates ativos de lembretes agendados
+      const [templates] = await pool.query(
+        `SELECT * FROM whatsapp_templates 
+         WHERE reseller_id = ? AND is_active = 1 AND trigger_event = 'scheduled'`,
+        [resellerId]
+      );
+
+      // Buscar clientes que deveriam ter recebido lembretes hoje mas não receberam
+      const [clients] = await pool.query(
+        `SELECT c.*, p.name as plan_name 
+         FROM clients c
+         LEFT JOIN plans p ON c.plan_id = p.id
+         WHERE c.reseller_id = ? AND c.status = 'active'`,
+        [resellerId]
+      );
+
+      const now = new Date();
+      const todayString = now.toISOString().split('T')[0];
+
+      for (const client of clients) {
+        // Calcular dias até vencimento
+        let renewalDate;
+        if (typeof client.renewal_date === 'string') {
+          const [year, month, day] = client.renewal_date.split('-').map(Number);
+          renewalDate = new Date(year, month - 1, day);
+        } else {
+          renewalDate = new Date(client.renewal_date);
+        }
+        
+        const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const renewalDateOnly = new Date(renewalDate.getFullYear(), renewalDate.getMonth(), renewalDate.getDate());
+        const daysUntilDue = Math.floor((renewalDateOnly - todayDate) / (1000 * 60 * 60 * 24));
+
+        for (const template of templates) {
+          // Verificar se é o dia certo para este template
+          if (daysUntilDue !== template.days_offset) {
+            continue;
+          }
+
+          // Verificar se já existe log para hoje
+          const [existingLogs] = await pool.query(
+            `SELECT id, status FROM whatsapp_reminder_logs 
+             WHERE client_id = ? AND template_id = ? AND DATE(created_at) = CURDATE()`,
+            [client.id, template.id]
+          );
+
+          // Se não existe log nenhum, criar um pendente
+          if (existingLogs.length === 0) {
+            console.log(`📝 Criando lembrete perdido: ${client.name} - ${template.name}`);
+
+            // Processar mensagem
+            let paymentLink = null;
+            try {
+              const [invoices] = await pool.query(
+                `SELECT payment_link FROM invoices 
+                 WHERE client_id = ? AND due_date = ? AND status = 'pending'
+                 ORDER BY created_at DESC LIMIT 1`,
+                [client.id, client.renewal_date]
+              );
+              if (invoices.length > 0 && invoices[0].payment_link) {
+                paymentLink = invoices[0].payment_link;
+              }
+            } catch (error) {
+              console.error('Erro ao buscar link de pagamento:', error);
+            }
+
+            const message = processMessageVariables(
+              template.message,
+              client,
+              daysUntilDue,
+              {
+                planName: client.plan_name,
+                discountValue: 0,
+                finalValue: client.value,
+                paymentLink: paymentLink
+              }
+            );
+
+            // Criar log pendente
+            const logId = await createReminderLog(
+              client.id,
+              template.id,
+              message,
+              todayString,
+              resellerId
+            );
+
+            if (logId) {
+              console.log(`✅ Lembrete perdido criado: ${client.name} - ${template.name}`);
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('❌ Erro ao verificar lembretes perdidos:', error);
+  }
+}
+
+/**
  * Processar lembretes
  */
 async function processReminders() {
@@ -344,6 +615,38 @@ async function processReminders() {
     for (const reseller of resellers) {
       const resellerId = reseller.reseller_id;
 
+      // Verificar se a assinatura do reseller está ativa
+      const [resellerData] = await pool.query(
+        `SELECT is_admin, subscription_expiry_date, account_status 
+         FROM resellers 
+         WHERE id = ?`,
+        [resellerId]
+      );
+
+      if (resellerData.length === 0) {
+        console.log(`⚠️  Reseller ${resellerId}: Não encontrado no banco`);
+        continue;
+      }
+
+      const resellerInfo = resellerData[0];
+
+      // Admin sempre tem acesso
+      if (!resellerInfo.is_admin) {
+        // Verificar se a assinatura está ativa
+        const expiryDate = resellerInfo.subscription_expiry_date;
+        const today = new Date().toISOString().split('T')[0];
+
+        if (!expiryDate || expiryDate < today) {
+          console.log(`🚫 Reseller ${resellerId}: Assinatura expirada (${expiryDate || 'sem data'}), pulando processamento`);
+          continue;
+        }
+
+        if (resellerInfo.account_status !== 'active' && resellerInfo.account_status !== 'trial') {
+          console.log(`🚫 Reseller ${resellerId}: Conta inativa (${resellerInfo.account_status}), pulando processamento`);
+          continue;
+        }
+      }
+
       // Buscar configurações do reseller
       const [settingsRows] = await pool.query(
         `SELECT * FROM whatsapp_reminder_settings WHERE reseller_id = ?`,
@@ -357,6 +660,24 @@ async function processReminders() {
 
       // Verificar horário global
       const globalCanSend = isWithinWorkingHours(settings, now) && isWorkingDay(settings, now);
+
+      // Verificar se WhatsApp está conectado para este reseller
+      const connectionStatus = await checkWhatsAppConnection(resellerId);
+      const previousStatus = connectionStatusCache.get(resellerId);
+      
+      // Atualizar cache de status
+      connectionStatusCache.set(resellerId, connectionStatus.connected);
+      
+      if (connectionStatus.connected) {
+        // Se WhatsApp acabou de se conectar (mudança de status), reprocessar lembretes pendentes
+        if (previousStatus === false || previousStatus === undefined) {
+          console.log(`🔄 Reseller ${resellerId}: WhatsApp reconectado, reprocessando lembretes pendentes...`);
+          await reprocessPendingReminders(resellerId);
+        }
+      } else {
+        console.log(`📱 Reseller ${resellerId}: WhatsApp desconectado (${connectionStatus.state}), pulando processamento`);
+        continue;
+      }
 
       // Buscar templates ativos (nova tabela unificada)
       const [templates] = await pool.query(
@@ -384,12 +705,25 @@ async function processReminders() {
 
       // Processar cada cliente
       for (const client of clients) {
-        const renewalDate = new Date(client.renewal_date);
+        // Parsear data como local (não UTC) para evitar problemas de timezone
+        let renewalDate;
+        if (typeof client.renewal_date === 'string') {
+          const [year, month, day] = client.renewal_date.split('-').map(Number);
+          renewalDate = new Date(year, month - 1, day); // month - 1 porque JS usa 0-11
+        } else {
+          // Já é um objeto Date do MySQL
+          renewalDate = new Date(client.renewal_date);
+        }
+        
         const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const renewalDateOnly = new Date(renewalDate.getFullYear(), renewalDate.getMonth(), renewalDate.getDate());
 
         // Calcular dias até vencimento (mesmo cálculo do MySQL DATEDIFF)
         const daysUntilDue = Math.floor((renewalDateOnly - todayDate) / (1000 * 60 * 60 * 24));
+
+        console.log(`\n   👤 Cliente: ${client.name}`);
+        console.log(`      📅 Vencimento: ${client.renewal_date}`);
+        console.log(`      ⏰ Dias até vencer: ${daysUntilDue}`);
 
         // Processar cada template
         for (const template of templates) {
@@ -399,6 +733,9 @@ async function processReminders() {
           // Template com days_offset negativo = após o vencimento
           const shouldSend = (daysUntilDue === template.days_offset);
 
+          console.log(`      📝 Template: ${template.name} (offset: ${template.days_offset})`);
+          console.log(`         Deve enviar? ${shouldSend ? 'SIM' : 'NÃO'} (${daysUntilDue} === ${template.days_offset})`);
+
           if (!shouldSend) continue;
 
           // Verificar horário de envio
@@ -406,25 +743,58 @@ async function processReminders() {
 
           if (template.use_global_schedule) {
             canSendNow = globalCanSend;
+            console.log(`         Horário global: ${canSendNow ? 'OK' : 'FORA DO HORÁRIO'}`);
           } else if (template.send_hour !== null) {
             // MODO SIMPLIFICADO: Ignora horário específico, sempre envia se for o dia certo
             // A verificação de duplicatas (checkExistingLog) garante que envia apenas 1x por dia
             canSendNow = isWorkingDay(settings, now);
+            console.log(`         Dia útil: ${canSendNow ? 'SIM' : 'NÃO'}`);
           } else {
             canSendNow = globalCanSend;
+            console.log(`         Horário global (fallback): ${canSendNow ? 'OK' : 'FORA DO HORÁRIO'}`);
           }
 
-          if (!canSendNow) continue;
+          if (!canSendNow) {
+            console.log(`         ⏭️  Pulando: fora do horário de envio`);
+            continue;
+          }
+
+          // ✅ VERIFICAR CONEXÃO DO WHATSAPP PRIMEIRO
+          const connectionStatus = await checkWhatsAppConnection(resellerId);
+          console.log(`         WhatsApp conectado? ${connectionStatus.connected ? 'SIM' : 'NÃO'} (${connectionStatus.state})`);
+
+          if (!connectionStatus.connected) {
+            console.log(`         ⏭️  Pulando: WhatsApp desconectado (${connectionStatus.error || connectionStatus.state})`);
+            continue;
+          }
 
           // ✅ VERIFICAR SE JÁ FOI ENVIADO HOJE (evita duplicatas)
           const hasExistingLog = await checkExistingLog(client.id, template.id);
+          console.log(`         Já enviou hoje? ${hasExistingLog ? 'SIM' : 'NÃO'}`);
 
           if (hasExistingLog) {
             // Já enviou hoje, pular
+            console.log(`         ⏭️  Pulando: já enviado hoje`);
             continue;
           }
 
           totalProcessed++;
+
+          // Buscar link de pagamento da fatura (se existir)
+          let paymentLink = null;
+          try {
+            const [invoices] = await pool.query(
+              `SELECT payment_link FROM invoices 
+               WHERE client_id = ? AND due_date = ? AND status = 'pending'
+               ORDER BY created_at DESC LIMIT 1`,
+              [client.id, client.renewal_date]
+            );
+            if (invoices.length > 0 && invoices[0].payment_link) {
+              paymentLink = invoices[0].payment_link;
+            }
+          } catch (error) {
+            console.error('Erro ao buscar link de pagamento:', error);
+          }
 
           // Processar mensagem
           const message = processMessageVariables(
@@ -434,11 +804,12 @@ async function processReminders() {
             {
               planName: client.plan_name,
               discountValue: 0,
-              finalValue: client.value
+              finalValue: client.value,
+              paymentLink: paymentLink
             }
           );
 
-          // Criar log
+          // Criar log APENAS se WhatsApp estiver conectado
           const logId = await createReminderLog(
             client.id,
             template.id,
@@ -454,7 +825,7 @@ async function processReminders() {
           }
 
           // Enviar mensagem
-          const result = await sendWhatsAppMessage(client.phone, message);
+          const result = await sendWhatsAppMessage(client.phone, message, resellerId);
 
           if (result.success) {
             await updateLogStatus(logId, 'sent', null, result.messageId);
@@ -506,6 +877,9 @@ async function start() {
     process.exit(1);
   }
 
+  // Verificar lembretes perdidos primeiro
+  await checkMissedReminders();
+
   // Processar imediatamente
   await processReminders();
 
@@ -516,7 +890,10 @@ async function start() {
   console.log(`\n⏰ Agendado para verificar a cada ${intervalMinutes} minuto(s)`);
   console.log('💡 Pressione Ctrl+C para encerrar\n');
 
-  setInterval(processReminders, intervalMs);
+  setInterval(async () => {
+    await checkMissedReminders();
+    await processReminders();
+  }, intervalMs);
 
   // Endpoint de status (opcional)
   const express = require('express');
@@ -539,8 +916,43 @@ async function start() {
     res.json(stats);
   });
 
+  // Endpoint para reprocessar lembretes de um reseller específico
+  app.post('/reprocess/:resellerId', async (req, res) => {
+    const { resellerId } = req.params;
+    
+    try {
+      console.log(`🔄 API: Reprocessando lembretes para ${resellerId}...`);
+      
+      // Verificar se WhatsApp está conectado
+      const connectionStatus = await checkWhatsAppConnection(resellerId);
+      if (!connectionStatus.connected) {
+        return res.status(400).json({
+          success: false,
+          error: `WhatsApp não conectado para ${resellerId}`,
+          state: connectionStatus.state
+        });
+      }
+
+      // Reprocessar lembretes pendentes
+      await reprocessPendingReminders(resellerId);
+      
+      res.json({
+        success: true,
+        message: `Lembretes reprocessados para ${resellerId}`,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error(`❌ Erro ao reprocessar via API:`, error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
   app.listen(statusPort, () => {
     console.log(`📊 Status endpoint: http://localhost:${statusPort}/health`);
+    console.log(`🔄 Reprocess endpoint: http://localhost:${statusPort}/reprocess/:resellerId`);
   });
 }
 

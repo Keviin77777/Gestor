@@ -148,7 +148,22 @@ async function createWhatsAppSession(instanceName) {
         
         // Estratégia de reconexão inteligente baseada no código de erro
         if (statusCode === DisconnectReason.badSession || statusCode === 401) {
-          console.log(`🧹 [${instanceName}] Sessão inválida (${statusCode}) - Limpando completamente...`);
+          const errorType = lastDisconnect?.error?.output?.payload?.error;
+          const isDeviceRemoved = errorType === 'device_removed' || 
+                                  JSON.stringify(lastDisconnect).includes('device_removed');
+          
+          if (isDeviceRemoved) {
+            console.log(`📱 [${instanceName}] Dispositivo removido pelo WhatsApp (401)`);
+            console.log(`⚠️ [${instanceName}] ATENÇÃO: Este número foi conectado em outra instância!`);
+            console.log(`💡 [${instanceName}] Cada número só pode estar conectado em UMA instância por vez.`);
+          } else {
+            console.log(`🧹 [${instanceName}] Sessão inválida (${statusCode}) - Limpando completamente...`);
+          }
+          
+          // Limpar keep-alive se existir
+          if (session.keepAliveInterval) {
+            clearInterval(session.keepAliveInterval);
+          }
           
           // Limpar pasta de sessão
           try {
@@ -194,7 +209,7 @@ async function createWhatsAppSession(instanceName) {
       } else if (connection === 'open') {
         console.log(`✅ [${instanceName}] WhatsApp conectado com sucesso!`);
         
-        // Atualizar status da sessão
+        // Atualizar status da sessão IMEDIATAMENTE
         const session = sessions.get(instanceName);
         if (session) {
           session.connected = true;
@@ -202,6 +217,7 @@ async function createWhatsAppSession(instanceName) {
           session.qrCode = null;
           session.reconnectAttempts = 0; // Reset contador de tentativas
           session.connectedAt = new Date().toISOString();
+          console.log(`🔓 [${instanceName}] Sessão marcada como conectada e pronta para uso`);
         }
         
         // Remover QR Code
@@ -226,19 +242,29 @@ async function createWhatsAppSession(instanceName) {
         
         session.keepAliveInterval = setInterval(async () => {
           try {
-            // Ping simples para manter conexão ativa
-            await sock.query({
-              tag: 'iq',
-              attrs: {
-                id: sock.generateMessageTag(),
-                type: 'get',
-                xmlns: 'w:p',
-                to: 's.whatsapp.net'
-              }
-            });
-            console.log(`💓 [${instanceName}] Keep-alive enviado`);
+            // Verificar se o socket ainda está aberto antes de enviar keep-alive
+            if (sock.ws?.readyState === 1) {
+              // Ping simples para manter conexão ativa
+              await sock.query({
+                tag: 'iq',
+                attrs: {
+                  id: sock.generateMessageTag(),
+                  type: 'get',
+                  xmlns: 'w:p',
+                  to: 's.whatsapp.net'
+                }
+              });
+              console.log(`💓 [${instanceName}] Keep-alive enviado`);
+            } else {
+              console.log(`⚠️ [${instanceName}] Socket não está aberto, pulando keep-alive`);
+            }
           } catch (error) {
             console.log(`⚠️ [${instanceName}] Erro no keep-alive:`, error.message);
+            // Se o erro for de conexão fechada, limpar o intervalo
+            if (error.message.includes('Connection Closed') || error.message.includes('closed')) {
+              clearInterval(session.keepAliveInterval);
+              console.log(`🔌 [${instanceName}] Keep-alive desativado devido a conexão fechada`);
+            }
           }
         }, 60000); // A cada 1 minuto
       }
@@ -494,12 +520,49 @@ app.post('/message/sendText/:instanceName', async (req, res) => {
   
   const session = sessions.get(instanceName);
   
-  if (!session || !session.connected || !session.sock) {
-    return res.status(400).json({
-      error: 'Bad Request',
-      message: 'Instance not connected'
+  // Verificação mais robusta do status da conexão
+  if (!session) {
+    return res.status(404).json({
+      error: 'Not Found',
+      message: `Instance '${instanceName}' not found. Please create the instance first.`
     });
   }
+  
+  if (!session.sock) {
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Instance socket not initialized. Please reconnect.'
+    });
+  }
+  
+  // Verificar se o socket está realmente aberto
+  const socketState = session.sock.ws?.readyState;
+  
+  // Verificação mais flexível: aceitar se connected=true OU se socketState=1 (OPEN)
+  // Isso resolve o problema de timing onde o socket está pronto mas connected ainda não foi setado
+  const isSocketOpen = socketState === 1; // WebSocket.OPEN
+  const isMarkedConnected = session.connected && session.status === 'open';
+  const isReady = isMarkedConnected || isSocketOpen;
+  
+  if (!isReady) {
+    console.log(`⚠️ [${instanceName}] Tentativa de envio com instância não conectada:`);
+    console.log(`   - session.connected: ${session.connected}`);
+    console.log(`   - session.status: ${session.status}`);
+    console.log(`   - socketState: ${socketState} (${socketState === 1 ? 'OPEN' : 'NOT OPEN'})`);
+    
+    return res.status(400).json({
+      error: 'Bad Request',
+      message: 'Instance not connected. Please scan QR code and wait for connection.',
+      details: {
+        connected: session.connected,
+        status: session.status,
+        socketState: socketState
+      }
+    });
+  }
+  
+  console.log(`✅ [${instanceName}] Instância pronta para enviar mensagem`);
+  console.log(`   - connected: ${session.connected}, status: ${session.status}, socketState: ${socketState}`);
   
   // Validar dados
   if (!number || !text) {
@@ -638,6 +701,165 @@ app.get('/ping', (req, res) => {
     status: 'pong',
     timestamp: new Date().toISOString()
   });
+});
+
+// Rota de diagnóstico detalhado de instância
+app.get('/instance/diagnose/:instanceName', (req, res) => {
+  const { instanceName } = req.params;
+  const session = sessions.get(instanceName);
+  
+  if (!session) {
+    return res.json({
+      exists: false,
+      message: `Instance '${instanceName}' not found`,
+      availableInstances: Array.from(sessions.keys())
+    });
+  }
+  
+  const socketState = session.sock?.ws?.readyState;
+  const socketStateNames = {
+    0: 'CONNECTING',
+    1: 'OPEN',
+    2: 'CLOSING',
+    3: 'CLOSED'
+  };
+  
+  res.json({
+    exists: true,
+    instanceName,
+    diagnosis: {
+      connected: session.connected,
+      status: session.status,
+      socketExists: !!session.sock,
+      socketState: socketState,
+      socketStateName: socketStateNames[socketState] || 'UNKNOWN',
+      phoneNumber: session.phoneNumber,
+      profileName: session.profileName,
+      connectedAt: session.connectedAt,
+      reconnectAttempts: session.reconnectAttempts || 0,
+      lastMessageReceived: session.lastMessageReceived,
+      lastPresenceUpdate: session.lastPresenceUpdate,
+      hasKeepAlive: !!session.keepAliveInterval
+    },
+    recommendation: session.connected && socketState === 1 
+      ? 'Instance is ready to send messages' 
+      : 'Instance is not ready. Please reconnect or wait for connection to stabilize.'
+  });
+});
+
+// Rota para verificar números conectados (evitar duplicação)
+app.get('/instance/connectedNumbers', (req, res) => {
+  const connectedNumbers = [];
+  
+  sessions.forEach((session, instanceName) => {
+    if (session.connected && session.phoneNumber) {
+      connectedNumbers.push({
+        instanceName,
+        phoneNumber: session.phoneNumber,
+        profileName: session.profileName,
+        connectedAt: session.connectedAt
+      });
+    }
+  });
+  
+  res.json({
+    total: connectedNumbers.length,
+    numbers: connectedNumbers
+  });
+});
+
+// Rota para limpar instâncias duplicadas/órfãs
+app.post('/instance/cleanup', async (req, res) => {
+  try {
+    const cleaned = [];
+    const kept = [];
+    
+    // Agrupar instâncias por reseller ID base
+    const resellerGroups = new Map();
+    
+    sessions.forEach((session, instanceName) => {
+      // Extrair ID base (ex: reseller_123_abc → 123)
+      const match = instanceName.match(/reseller_(\d+)/);
+      if (match) {
+        const baseId = match[1];
+        if (!resellerGroups.has(baseId)) {
+          resellerGroups.set(baseId, []);
+        }
+        resellerGroups.get(baseId).push({ instanceName, session });
+      }
+    });
+    
+    // Para cada grupo, manter apenas a instância conectada ou a mais recente
+    resellerGroups.forEach((instances, baseId) => {
+      if (instances.length > 1) {
+        console.log(`🔍 [Cleanup] Encontradas ${instances.length} instâncias para reseller ${baseId}`);
+        
+        // Ordenar: conectadas primeiro, depois por data de conexão
+        instances.sort((a, b) => {
+          if (a.session.connected && !b.session.connected) return -1;
+          if (!a.session.connected && b.session.connected) return 1;
+          
+          const dateA = new Date(a.session.connectedAt || 0).getTime();
+          const dateB = new Date(b.session.connectedAt || 0).getTime();
+          return dateB - dateA;
+        });
+        
+        // Manter a primeira (melhor), limpar as outras
+        const toKeep = instances[0];
+        const toClean = instances.slice(1);
+        
+        kept.push(toKeep.instanceName);
+        
+        toClean.forEach(({ instanceName, session }) => {
+          console.log(`🧹 [Cleanup] Removendo instância duplicada: ${instanceName}`);
+          
+          // Limpar keep-alive
+          if (session.keepAliveInterval) {
+            clearInterval(session.keepAliveInterval);
+          }
+          
+          // Fechar socket
+          if (session.sock) {
+            try {
+              session.sock.end();
+            } catch (e) {
+              // Ignorar erros
+            }
+          }
+          
+          // Remover da memória
+          sessions.delete(instanceName);
+          qrCodes.delete(instanceName);
+          
+          // Limpar pasta de sessão
+          const sessionPath = path.join(sessionsDir, instanceName);
+          if (fs.existsSync(sessionPath)) {
+            fs.rmSync(sessionPath, { recursive: true, force: true });
+          }
+          
+          cleaned.push(instanceName);
+        });
+      } else {
+        kept.push(instances[0].instanceName);
+      }
+    });
+    
+    res.json({
+      success: true,
+      cleaned: cleaned.length,
+      kept: kept.length,
+      details: {
+        cleaned,
+        kept
+      }
+    });
+  } catch (error) {
+    console.error('❌ Erro ao limpar instâncias:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
 });
 
 // Middleware de erro
