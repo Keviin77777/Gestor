@@ -1,0 +1,33 @@
+# ==========================================
+# 🚀 COMANDOS PARA EXECUTAR NA VPS
+# ==========================================
+
+# 1. Ir para o diretório do projeto
+cd /www/wwwroot/ultragestor.site/Gestor
+
+# 2. Fazer backup do .env (importante!)
+cp .env .env.backup
+
+# 3. Puxar atualizações do GitHub
+git pull origin main
+
+# 4. Restaurar .env se necessário
+cp .env.backup .env
+
+# 5. Dar permissão de execução ao script
+chmod +x CORRIGIR_ADMIN_TEMPLATES.sh
+
+# 6. Executar correção do admin e templates
+./CORRIGIR_ADMIN_TEMPLATES.sh
+
+# 7. Reiniciar PM2 (Next.js)
+pm2 restart ultragestor
+
+# ==========================================
+# ✅ PRONTO! Agora teste:
+# ==========================================
+# 1. Faça logout no navegador
+# 2. Limpe o cache (Ctrl+Shift+Delete)
+# 3. Faça login com admin@admin.com
+# 4. Deve ver o Dashboard Administrativo
+# 5. Acesse WhatsApp → Templates (deve ter 6 templates)
