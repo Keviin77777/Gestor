@@ -29,7 +29,7 @@ header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
 $allowed_origins = [
     'http://localhost:9002',
     'http://localhost:3000',
-    getenv('FRONTEND_URL') ?: 'https://yourdomain.com'
+    env('FRONTEND_URL', 'https://yourdomain.com')
 ];
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -47,14 +47,33 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS
 }
 
 // Load environment variables
+// Load .env file (compatible with disabled putenv)
 if (file_exists(__DIR__ . '/../.env')) {
     $lines = file(__DIR__ . '/../.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     foreach ($lines as $line) {
         if (strpos(trim($line), '#') === 0) continue;
         if (strpos($line, '=') === false) continue;
         list($key, $value) = explode('=', $line, 2);
-        putenv(trim($key) . '=' . trim($value));
+        $key = trim($key);
+        $value = trim($value);
+        
+        // Use $_ENV instead of putenv (works even if putenv is disabled)
+        $_ENV[$key] = $value;
+        $_SERVER[$key] = $value;
+        
+        // Try putenv if available
+        if (function_exists('putenv')) {
+            @putenv($key . '=' . $value);
+        }
     }
+}
+
+/**
+ * Helper function to get environment variables
+ * Works even if putenv() is disabled
+ */
+function env($key, $default = null) {
+    return $_ENV[$key] ?? $_SERVER[$key] ?? getenv($key) ?: $default;
 }
 
 /**
@@ -65,8 +84,10 @@ class JWT {
     private static $algorithm = 'HS256';
     
     public static function init() {
-        self::$secret_key = getenv('JWT_SECRET') ?: bin2hex(random_bytes(32));
-        if (!getenv('JWT_SECRET')) {
+        // Get JWT_SECRET using helper function
+        $jwt_secret = env('JWT_SECRET');
+        self::$secret_key = $jwt_secret ?: bin2hex(random_bytes(32));
+        if (!$jwt_secret) {
             error_log('WARNING: JWT_SECRET not set in environment. Using random key.');
         }
     }
@@ -344,8 +365,10 @@ class Encryption {
     private static $key;
     
     public static function init() {
-        self::$key = getenv('ENCRYPTION_KEY') ?: bin2hex(random_bytes(32));
-        if (!getenv('ENCRYPTION_KEY')) {
+        // Get ENCRYPTION_KEY using helper function
+        $encryption_key = env('ENCRYPTION_KEY');
+        self::$key = $encryption_key ?: bin2hex(random_bytes(32));
+        if (!$encryption_key) {
             error_log('WARNING: ENCRYPTION_KEY not set in environment. Using random key.');
         }
     }

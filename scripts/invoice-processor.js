@@ -141,7 +141,7 @@ function processMessageVariables(message, client, dueDate, value, planName, paym
 async function generatePaymentLink(invoiceId, resellerId, clientId, value, description) {
   try {
     console.log(`      🔍 Buscando método de pagamento para reseller: ${resellerId}`);
-    
+
     // Buscar método de pagamento padrão ativo
     const [paymentMethods] = await pool.query(
       `SELECT * FROM payment_methods 
@@ -202,7 +202,7 @@ async function generatePaymentLink(invoiceId, resellerId, clientId, value, descr
 
     console.log(`      🌐 Fazendo requisição ao Mercado Pago...`);
     console.log(`      💰 Valor: R$ ${value}`);
-    
+
     // Fazer requisição ao Mercado Pago
     const response = await fetch('https://api.mercadopago.com/v1/payments', {
       method: 'POST',
@@ -262,16 +262,16 @@ async function generatePaymentLink(invoiceId, resellerId, clientId, value, descr
  */
 function extractNumericId(resellerId) {
   // Se já começa com "reseller_", remover
-  let cleanId = resellerId.startsWith('reseller_') 
-    ? resellerId.replace('reseller_', '') 
+  let cleanId = resellerId.startsWith('reseller_')
+    ? resellerId.replace('reseller_', '')
     : resellerId;
-  
+
   // Extrair apenas números do início (antes de qualquer underscore ou caractere não numérico)
   const numericMatch = cleanId.match(/^(\d+)/);
   if (numericMatch) {
     return numericMatch[1];
   }
-  
+
   return cleanId;
 }
 
@@ -289,7 +289,7 @@ async function sendWhatsAppMessage(phone, message, resellerId) {
     // Extrair ID numérico e criar nome da instância
     const numericId = extractNumericId(resellerId);
     const instanceName = `reseller_${numericId}`;
-    
+
     console.log(`      🔧 Usando instância: ${instanceName} (de ${resellerId})`);
 
     const response = await fetch(
@@ -467,13 +467,13 @@ async function processInvoices() {
           const invoiceId = `inv_auto_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
           const invoiceDate = new Date().toISOString().split('T')[0];
           const finalValue = value; // Sem desconto por padrão
-          
+
           // Gerar número sequencial da fatura com retry em caso de duplicata
           let invoiceNumber;
           let invoiceInserted = false;
           let retryCount = 0;
           const maxRetries = 5;
-          
+
           while (!invoiceInserted && retryCount < maxRetries) {
             try {
               // Buscar o maior número existente
@@ -483,14 +483,14 @@ async function processInvoices() {
                  WHERE reseller_id = ? AND invoice_number REGEXP '^[0-9]+$'`,
                 [resellerId]
               );
-              
+
               if (lastInvoice.length > 0 && lastInvoice[0].max_number) {
                 const lastNumber = parseInt(lastInvoice[0].max_number) || 0;
                 invoiceNumber = String(lastNumber + 1).padStart(6, '0');
               } else {
                 invoiceNumber = '000001';
               }
-              
+
               console.log(`   📄 Tentativa ${retryCount + 1}: Número da fatura: ${invoiceNumber}`);
 
               // Tentar inserir
@@ -500,7 +500,7 @@ async function processInvoices() {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())`,
                 [invoiceId, resellerId, clientId, invoiceNumber, invoiceDate, renewalDate, value, finalValue, description]
               );
-              
+
               invoiceInserted = true;
             } catch (insertError) {
               if (insertError.code === 'ER_DUP_ENTRY' && retryCount < maxRetries - 1) {
@@ -513,7 +513,7 @@ async function processInvoices() {
               }
             }
           }
-          
+
           if (!invoiceInserted) {
             throw new Error('Não foi possível gerar número único de fatura após múltiplas tentativas');
           }
@@ -529,7 +529,7 @@ async function processInvoices() {
           // Enviar WhatsApp se cliente tem telefone
           if (client.phone) {
             console.log(`      📞 Cliente tem telefone: ${client.phone}`);
-            
+
             // Verificar se já enviou WhatsApp para esta fatura
             const hasWhatsAppLog = await checkExistingWhatsAppLog(invoiceId);
             console.log(`      📋 Já enviou WhatsApp? ${hasWhatsAppLog ? 'SIM' : 'NÃO'}`);
