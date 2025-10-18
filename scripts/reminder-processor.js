@@ -5,8 +5,9 @@
  * Roda independente do frontend, processando lembretes 24/7
  */
 
-// Carregar variáveis de ambiente do arquivo .env (na pasta pai)
-require('dotenv').config({ path: '../.env' });
+// Carregar variáveis de ambiente do arquivo .env
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const mysql = require('mysql2/promise');
 const fetch = require('node-fetch');
