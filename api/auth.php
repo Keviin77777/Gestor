@@ -242,8 +242,8 @@ function handleLogin(): void {
     
     // Get user with password hash
     $stmt = executeQuery(
-        "SELECT id, email, display_name, email_verified, is_active, photo_url, password_hash 
-         FROM resellers 
+        "SELECT id, email, name, display_name, role, is_active, password 
+         FROM users 
          WHERE email = ? AND is_active = true",
         [$email]
     );
@@ -257,8 +257,8 @@ function handleLogin(): void {
     }
     
     // Verify password
-    if (empty($user['password_hash'])) {
-        // User doesn't have a password set (migrated from Firebase without password)
+    if (empty($user['password'])) {
+        // User doesn't have a password set
         error_log("User {$email} attempted login but has no password set");
         Response::error('Account needs password setup. Please contact support.', 401);
     }
@@ -272,7 +272,7 @@ function handleLogin(): void {
         $isValidPassword = true;
     } else {
         // Verificação normal com hash
-        $isValidPassword = password_verify($password, $user['password_hash']);
+        $isValidPassword = password_verify($password, $user['password']);
     }
     
     if (!$isValidPassword) {
@@ -282,11 +282,11 @@ function handleLogin(): void {
         Response::error('Invalid credentials', 401);
     }
     
-    // Update last login
-    executeQuery(
-        "UPDATE resellers SET last_login = NOW() WHERE id = ?",
-        [$user['id']]
-    );
+    // Update last login (users table doesn't have last_login, skip for now)
+    // executeQuery(
+    //     "UPDATE users SET updated_at = NOW() WHERE id = ?",
+    //     [$user['id']]
+    // );
     
     // Generate JWT token
     $token = JWT::encode([
