@@ -179,12 +179,12 @@ function handleRegister(): void {
         $token_hash = hash('sha256', $token);
         
         executeQuery(
-            "INSERT INTO sessions (id, reseller_id, token_hash, ip_address, user_agent, expires_at)
+            "INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at)
              VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))",
             [
                 $session_id,
-                $user_id,
-                $token_hash,
+                $user['id'],
+                $token,
                 $_SERVER['REMOTE_ADDR'] ?? null,
                 $_SERVER['HTTP_USER_AGENT'] ?? null
             ]
@@ -300,12 +300,12 @@ function handleLogin(): void {
     $token_hash = hash('sha256', $token);
     
     executeQuery(
-        "INSERT INTO sessions (id, reseller_id, token_hash, ip_address, user_agent, expires_at)
+        "INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at)
          VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))",
         [
             $session_id,
             $user['id'],
-            $token_hash,
+            $token,
             $_SERVER['REMOTE_ADDR'] ?? null,
             $_SERVER['HTTP_USER_AGENT'] ?? null
         ]
