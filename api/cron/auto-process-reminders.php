@@ -76,60 +76,95 @@ try {
         exit(0);
     }
     
-    // Buscar templates ativos
-    $stmt = $conn->prepare("
-        SELECT * FROM whatsapp_templates 
-        WHERE trigger_event = 'scheduled' AND is_active = 1 
-        ORDER BY days_offset DESC
-    ");
+    // Buscar configurações de cada reseller (mesma lógica do JavaScript)
+    $stmt = $conn->prepare("SELECT DISTINCT reseller_id FROM whatsapp_reminder_settings WHERE is_enabled = 1");
     $stmt->execute();
-    $templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $resellers = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    error_log("Found " . count($templates) . " active reminder templates");
+    if (count($resellers) === 0) {
+        error_log("⚠️  Nenhum reseller com sistema de lembretes ativo");
+        exit(0);
+    }
     
     $totalProcessed = 0;
     $totalSent = 0;
     $totalSkipped = 0;
     $totalErrors = 0;
     
-    foreach ($templates as $template) {
+    foreach ($resellers as $reseller) {
+        $reseller_id = $reseller['reseller_id'];
+        
+        // Buscar templates ativos para este reseller
+        $stmt = $conn->prepare("
+            SELECT * FROM whatsapp_templates 
+            WHERE reseller_id = ? AND trigger_event = 'scheduled' AND is_active = 1 
+            ORDER BY days_offset DESC
+        ");
+        $stmt->execute([$reseller_id]);
+        $templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        if (count($templates) === 0) {
+            error_log("📋 Reseller {$reseller_id}: Nenhum template ativo");
+            continue;
+        }
+        
+        error_log("📋 Reseller {$reseller_id}: " . count($templates) . " templates ativos");
+        
+        // Buscar clientes ativos deste reseller
+        $stmt = $conn->prepare("
+            SELECT c.*, p.name as plan_name 
+            FROM clients c
+            LEFT JOIN plans p ON c.plan_id = p.id
+            WHERE c.reseller_id = ? AND c.status = 'active'
+        ");
+        $stmt->execute([$reseller_id]);
+        $reseller_clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        error_log("👥 Reseller {$reseller_id}: " . count($reseller_clients) . " clientes ativos");
+        
+        foreach ($templates as $template) {
         $template_name = $template['name'];
         $template_id = $template['id'];
-        $template_type = $template['reminder_type'] ?? 'before';
         $days_offset = (int)$template['days_offset'];
         $use_global_schedule = (bool)$template['use_global_schedule'];
         
-        error_log("\nProcessing template: {$template_name} (type: {$template_type}, offset: {$days_offset}d)");
+        error_log("\nProcessing template: {$template_name} (offset: {$days_offset}d)");
         
         // CRON JOB MODE: Sempre envia quando executado, ignora horários específicos
         // O controle de horário deve ser feito na configuração do cron job
         $canSendNow = true;
         error_log("  Cron mode: Always send when executed");
         
-        // Buscar clientes elegíveis
+        // Buscar clientes elegíveis - MESMA LÓGICA DO JAVASCRIPT
+        // Usar days_offset diretamente: positivo = antes, 0 = no dia, negativo = depois
         $sql = "
             SELECT c.*, p.name as plan_name
             FROM clients c
             LEFT JOIN plans p ON c.plan_id = p.id
             WHERE c.status = 'active'
+            AND DATEDIFF(c.renewal_date, DATE(CONVERT_TZ(NOW(), '+00:00', '-03:00'))) = {$days_offset}
         ";
         
-        // Adicionar condição baseada no tipo de lembrete
-        if ($template_type === 'before') {
-            $sql .= " AND DATEDIFF(c.renewal_date, CURDATE()) = {$days_offset}";
-        } elseif ($template_type === 'on_due') {
-            $sql .= " AND DATEDIFF(c.renewal_date, CURDATE()) = 0";
-        } elseif ($template_type === 'after') {
-            $sql .= " AND DATEDIFF(c.renewal_date, CURDATE()) = {$days_offset}";
+        // Filtrar clientes elegíveis para este template
+        $eligible_clients = [];
+        foreach ($reseller_clients as $client) {
+            // Calcular dias até vencimento (mesma lógica do JavaScript)
+            $renewal_date = new DateTime($client['renewal_date']);
+            $today_date = new DateTime('today');
+            $days_until_due = $today_date->diff($renewal_date)->days;
+            if ($renewal_date < $today_date) {
+                $days_until_due = -$days_until_due;
+            }
+            
+            // Verificar se é o dia certo para enviar (mesma lógica do JavaScript)
+            if ($days_until_due === $days_offset) {
+                $eligible_clients[] = $client;
+            }
         }
         
-        $stmt = $conn->prepare($sql);
-        $stmt->execute();
-        $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        error_log("  Found " . count($eligible_clients) . " eligible clients");
         
-        error_log("  Found " . count($clients) . " eligible clients");
-        
-        foreach ($clients as $client) {
+        foreach ($eligible_clients as $client) {
             $totalProcessed++;
             $client_id = $client['id'];
             $client_name = $client['name'];
@@ -159,13 +194,16 @@ try {
             }
             
             try {
-                // Calcular dias até vencimento
-                $renewal_date = new DateTime($client['renewal_date']);
-                $today_date = new DateTime('today');
-                $days_until_due = $today_date->diff($renewal_date)->days;
-                if ($renewal_date < $today_date) {
-                    $days_until_due = -$days_until_due;
-                }
+                // Calcular dias até vencimento (mesma lógica do JavaScript)
+                $renewal_parts = explode('-', $client['renewal_date']);
+                $renewal_date = new DateTime();
+                $renewal_date->setDate((int)$renewal_parts[0], (int)$renewal_parts[1], (int)$renewal_parts[2]);
+                $renewal_date->setTime(0, 0, 0);
+                
+                $today_date = new DateTime();
+                $today_date->setTime(0, 0, 0);
+                
+                $days_until_due = (int)(($renewal_date->getTimestamp() - $today_date->getTimestamp()) / (24 * 60 * 60));
                 
                 // Processar mensagem
                 $message = processReminderMessage(
@@ -225,6 +263,7 @@ try {
             }
         }
     }
+}
     
     // Log final
     error_log("\n=== Summary ===");
@@ -245,6 +284,8 @@ try {
 function processReminderMessage($template, $client, $days_until_due) {
     $renewal_date = new DateTime($client['renewal_date']);
     $formatted_date = $renewal_date->format('d/m/Y');
+    $current_date = new DateTime();
+    $current_hour = $current_date->format('H:i');
     
     // Texto de dias restantes
     if ($days_until_due > 0) {
@@ -256,15 +297,101 @@ function processReminderMessage($template, $client, $days_until_due) {
         $days_text = $abs_days === 1 ? "há 1 dia" : "há {$abs_days} dias";
     }
     
-    // Substituir variáveis
+    // Formatar data por extenso
+    $months = [
+        1 => 'janeiro', 2 => 'fevereiro', 3 => 'março', 4 => 'abril',
+        5 => 'maio', 6 => 'junho', 7 => 'julho', 8 => 'agosto',
+        9 => 'setembro', 10 => 'outubro', 11 => 'novembro', 12 => 'dezembro'
+    ];
+    $data_extenso = $renewal_date->format('j') . ' de ' . $months[(int)$renewal_date->format('n')] . ' de ' . $renewal_date->format('Y');
+    
+    // Status do cliente
+    $status_map = [
+        'active' => 'Ativo',
+        'inactive' => 'Inativo',
+        'suspended' => 'Suspenso',
+        'cancelled' => 'Cancelado'
+    ];
+    $status_cliente = $status_map[$client['status']] ?? $client['status'] ?? 'Ativo';
+    
+    // Buscar link de pagamento da fatura (se existir)
+    $payment_link = null;
+    try {
+        global $conn;
+        $stmt = $conn->prepare("
+            SELECT payment_link FROM invoices 
+            WHERE client_id = ? AND due_date = ? AND status = 'pending'
+            ORDER BY created_at DESC LIMIT 1
+        ");
+        $stmt->execute([$client['id'], $client['renewal_date']]);
+        $invoice = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($invoice && !empty($invoice['payment_link'])) {
+            $payment_link = $invoice['payment_link'];
+        }
+    } catch (Exception $e) {
+        error_log("Erro ao buscar link de pagamento: " . $e->getMessage());
+    }
+    
+    // Valores numéricos
+    $client_value = floatval($client['value']);
+    $discount_value = 0; // Pode ser expandido futuramente
+    $final_value = $client_value;
+    
+    // Mapa completo de variáveis (igual ao JavaScript)
+    $variables = [
+        // Cliente
+        'CLIENT_NAME' => $client['name'] ?? '',
+        'cliente_nome' => $client['name'] ?? '',
+        'CLIENT_PHONE' => $client['phone'] ?? '',
+        'cliente_telefone' => $client['phone'] ?? '',
+        'USERNAME' => $client['username'] ?? '',
+        'cliente_usuario' => $client['username'] ?? '',
+        
+        // Datas
+        'DUE_DATE' => $formatted_date,
+        'data_vencimento' => $formatted_date,
+        'data_vencimento_extenso' => $data_extenso,
+        'DAYS_UNTIL_DUE' => strval(abs($days_until_due)),
+        'dias_restantes' => strval(abs($days_until_due)),
+        'dias_restantes_texto' => $days_text,
+        'ano_vencimento' => $renewal_date->format('Y'),
+        'mes_vencimento' => $months[(int)$renewal_date->format('n')],
+        'CURRENT_DATE' => $current_date->format('d/m/Y'),
+        'data_hoje' => $current_date->format('d/m/Y'),
+        'data_atual' => $current_date->format('d/m/Y'),
+        'hora_atual' => $current_hour,
+        
+        // Valores
+        'AMOUNT' => number_format($client_value, 2, ',', '.'),
+        'valor' => number_format($client_value, 2, ',', '.'),
+        'valor_numerico' => number_format($client_value, 2, '.', ''),
+        'DISCOUNT_VALUE' => number_format($discount_value, 2, ',', '.'),
+        'desconto' => number_format($discount_value, 2, ',', '.'),
+        'FINAL_VALUE' => number_format($final_value, 2, ',', '.'),
+        'valor_final' => number_format($final_value, 2, ',', '.'),
+        
+        // Plano/Sistema
+        'PLAN_NAME' => $client['plan_name'] ?? 'Plano',
+        'plano' => $client['plan_name'] ?? 'Plano',
+        'plano_nome' => $client['plan_name'] ?? 'Plano',
+        'status_cliente' => $status_cliente,
+        'CLIENT_STATUS' => $status_cliente,
+        'BUSINESS_NAME' => 'GestPlay',
+        'empresa_nome' => 'GestPlay',
+        
+        // Link de pagamento
+        'link_pagamento' => $payment_link ?: 'Link não disponível',
+        'link_fatura' => $payment_link ?: 'Link não disponível',
+        'PAYMENT_LINK' => $payment_link ?: 'Link não disponível',
+    ];
+    
+    // Substituir todas as variáveis (suporta {var} e {{var}})
     $message = $template;
-    $message = str_replace('{{cliente_nome}}', $client['name'], $message);
-    $message = str_replace('{{data_vencimento}}', $formatted_date, $message);
-    $message = str_replace('{{data_vencimento_extenso}}', $formatted_date, $message);
-    $message = str_replace('{{dias_restantes}}', abs($days_until_due), $message);
-    $message = str_replace('{{dias_restantes_texto}}', $days_text, $message);
-    $message = str_replace('{{valor}}', number_format($client['value'], 2, ',', '.'), $message);
-    $message = str_replace('{{plano}}', $client['plan_name'] ?? 'Plano', $message);
+    foreach ($variables as $key => $value) {
+        // Substituir {{variavel}} e {variavel} (case insensitive)
+        $message = preg_replace('/\{\{' . preg_quote($key, '/') . '\}\}/i', $value, $message);
+        $message = preg_replace('/\{' . preg_quote($key, '/') . '\}/i', $value, $message);
+    }
     
     return $message;
 }
@@ -273,11 +400,21 @@ function processReminderMessage($template, $client, $days_until_due) {
  * Envia lembrete via WhatsApp
  */
 function sendReminderWhatsApp($client, $message) {
-    // Formatar telefone
+    // Formatar telefone (mesma lógica do JavaScript)
     $phone = preg_replace('/\D/', '', $client['phone']);
-    if (strlen($phone) === 11 && substr($phone, 0, 2) >= 11 && substr($phone, 0, 2) <= 99) {
-        $phone = '55' . $phone;
-    } elseif (strlen($phone) === 10 && substr($phone, 0, 2) >= 11 && substr($phone, 0, 2) <= 99) {
+    
+    // Remover código do país se já tiver
+    if (strlen($phone) > 11 && substr($phone, 0, 2) === '55') {
+        $phone = substr($phone, 2);
+    }
+    
+    // Pegar últimos 11 dígitos
+    if (strlen($phone) > 11) {
+        $phone = substr($phone, -11);
+    }
+    
+    // Validar formato e adicionar código do país
+    if (strlen($phone) === 11 || strlen($phone) === 10) {
         $phone = '55' . $phone;
     }
     
@@ -289,13 +426,22 @@ function sendReminderWhatsApp($client, $message) {
         return ['success' => false, 'error' => 'WhatsApp API not configured'];
     }
     
+    // Extrair ID numérico do reseller_id e criar nome da instância (mesma lógica do JavaScript)
+    $reseller_id = $client['reseller_id'];
+    $clean_id = str_replace('reseller_', '', $reseller_id);
+    preg_match('/^(\d+)/', $clean_id, $matches);
+    $numeric_id = $matches[1] ?? $clean_id;
+    $instance_name = "reseller_{$numeric_id}";
+    
+    error_log("    🔧 Usando instância: {$instance_name} (de {$reseller_id})");
+    
     // Enviar mensagem
     $whatsapp_data = [
         'number' => $phone,
         'text' => $message
     ];
     
-    $url = rtrim($whatsapp_url, '/') . '/message/sendText/gestplay-instance';
+    $url = rtrim($whatsapp_url, '/') . "/message/sendText/{$instance_name}";
     $post_data = json_encode($whatsapp_data);
     
     $context = [

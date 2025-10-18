@@ -81,6 +81,8 @@ function getClients(string $reseller_id): void {
     $limit = min((int)($_GET['limit'] ?? 100), 1000);
     $offset = (int)($_GET['offset'] ?? 0);
     
+    error_log("[getClients] Buscando clientes para reseller_id: {$reseller_id}");
+    
     $sql = "SELECT c.*, p.name as plan_name, pan.name as panel_name
             FROM clients c
             LEFT JOIN plans p ON c.plan_id = p.id
@@ -140,6 +142,9 @@ function getClients(string $reseller_id): void {
     
     $count_stmt = executeQuery($count_sql, $count_params);
     $total = $count_stmt->fetch()['total'];
+    
+    error_log("[getClients] Total de clientes encontrados: {$total}");
+    error_log("[getClients] Clientes retornados: " . count($clients));
     
     Response::success([
         'clients' => $clients,
@@ -362,14 +367,84 @@ function createClient(string $reseller_id): void {
                         }
                     }
                     
-                    // Processar variáveis do template
+                    // Processar variáveis do template (todas as variáveis disponíveis)
+                    $renewal_date = new DateTime($data['renewal_date']);
+                    $current_date = new DateTime();
+                    $current_hour = $current_date->format('H:i');
+                    $client_value = floatval($data['value']);
+                    
+                    // Formatar data por extenso
+                    $months = [
+                        1 => 'janeiro', 2 => 'fevereiro', 3 => 'março', 4 => 'abril',
+                        5 => 'maio', 6 => 'junho', 7 => 'julho', 8 => 'agosto',
+                        9 => 'setembro', 10 => 'outubro', 11 => 'novembro', 12 => 'dezembro'
+                    ];
+                    $data_extenso = $renewal_date->format('j') . ' de ' . $months[(int)$renewal_date->format('n')] . ' de ' . $renewal_date->format('Y');
+                    
+                    // Status do cliente
+                    $status_map = [
+                        'active' => 'Ativo',
+                        'inactive' => 'Inativo',
+                        'suspended' => 'Suspenso',
+                        'cancelled' => 'Cancelado'
+                    ];
+                    $status_cliente = $status_map[$data['status'] ?? 'active'] ?? 'Ativo';
+                    
+                    // Mapa completo de variáveis
+                    $variables = [
+                        // Cliente
+                        'CLIENT_NAME' => $data['name'] ?? '',
+                        'cliente_nome' => $data['name'] ?? '',
+                        'CLIENT_PHONE' => $data['phone'] ?? '',
+                        'cliente_telefone' => $data['phone'] ?? '',
+                        'USERNAME' => $data['username'] ?? '',
+                        'cliente_usuario' => $data['username'] ?? '',
+                        'senha' => $data['password'] ?? '',
+                        
+                        // Datas
+                        'DUE_DATE' => $renewal_date->format('d/m/Y'),
+                        'data_vencimento' => $renewal_date->format('d/m/Y'),
+                        'data_vencimento_extenso' => $data_extenso,
+                        'ano_vencimento' => $renewal_date->format('Y'),
+                        'mes_vencimento' => $months[(int)$renewal_date->format('n')],
+                        'CURRENT_DATE' => $current_date->format('d/m/Y'),
+                        'data_hoje' => $current_date->format('d/m/Y'),
+                        'data_atual' => $current_date->format('d/m/Y'),
+                        'hora_atual' => $current_hour,
+                        
+                        // Valores
+                        'AMOUNT' => number_format($client_value, 2, ',', '.'),
+                        'valor' => number_format($client_value, 2, ',', '.'),
+                        'valor_numerico' => number_format($client_value, 2, '.', ''),
+                        'DISCOUNT_VALUE' => '0,00',
+                        'desconto' => '0,00',
+                        'FINAL_VALUE' => number_format($client_value, 2, ',', '.'),
+                        'valor_final' => number_format($client_value, 2, ',', '.'),
+                        
+                        // Plano/Sistema
+                        'PLAN_NAME' => $planName,
+                        'plano' => $planName,
+                        'plano_nome' => $planName,
+                        'status_cliente' => $status_cliente,
+                        'CLIENT_STATUS' => $status_cliente,
+                        'BUSINESS_NAME' => 'GestPlay',
+                        'empresa_nome' => 'GestPlay',
+                        
+                        // Referência (para boas-vindas, pode ser "Cadastro" ou "Ativação")
+                        'referencia' => 'Cadastro',
+                        'REFERENCE' => 'Cadastro',
+                        
+                        // Link de pagamento (não aplicável para boas-vindas)
+                        'link_pagamento' => 'Link não disponível',
+                        'link_fatura' => 'Link não disponível',
+                        'PAYMENT_LINK' => 'Link não disponível',
+                    ];
+                    
+                    // Substituir todas as variáveis
                     $message = $template['message'];
-                    $message = str_replace('{{cliente_nome}}', $data['name'], $message);
-                    $message = str_replace('{{cliente_usuario}}', $data['username'] ?? '', $message);
-                    $message = str_replace('{{senha}}', $data['password'] ?? '', $message);
-                    $message = str_replace('{{plano}}', $planName, $message);
-                    $message = str_replace('{{valor}}', number_format($data['value'], 2, ',', '.'), $message);
-                    $message = str_replace('{{data_vencimento}}', date('d/m/Y', strtotime($data['renewal_date'])), $message);
+                    foreach ($variables as $key => $value) {
+                        $message = str_replace('{{' . $key . '}}', $value, $message);
+                    }
                     
                     error_log("Welcome WhatsApp - Message: " . substr($message, 0, 100));
                     
@@ -388,12 +463,24 @@ function createClient(string $reseller_id): void {
                     $whatsapp_key = getenv('WHATSAPP_API_KEY') ?: '';
                     
                     if ($whatsapp_url && $whatsapp_key) {
+                        // Extrair ID numérico do reseller_id
+                        $cleanId = $reseller_id;
+                        if (strpos($cleanId, 'reseller_') === 0) {
+                            $cleanId = substr($cleanId, 9); // Remove "reseller_"
+                        }
+                        // Extrair apenas números do início
+                        preg_match('/^(\d+)/', $cleanId, $matches);
+                        $numericId = $matches[1] ?? $cleanId;
+                        $instanceName = "reseller_{$numericId}";
+                        
+                        error_log("Welcome WhatsApp - Using instance: {$instanceName} (from {$reseller_id})");
+                        
                         $whatsapp_data = [
                             'number' => $phone,
                             'text' => $message
                         ];
                         
-                        $url = rtrim($whatsapp_url, '/') . '/message/sendText/gestplay-instance';
+                        $url = rtrim($whatsapp_url, '/') . "/message/sendText/{$instanceName}";
                         $post_data = json_encode($whatsapp_data);
                         
                         $context = [

@@ -17,14 +17,19 @@ require_once __DIR__ . '/../../database/config.php';
 try {
     $user = Auth::requireAuth();
     $reseller_id = $user['reseller_id'];
+    
+    // Verificar se é admin
+    $conn = getDbConnection();
+    $stmt = $conn->prepare("SELECT is_admin FROM resellers WHERE id = ?");
+    $stmt->execute([$reseller_id]);
+    $userData = $stmt->fetch(PDO::FETCH_ASSOC);
+    $is_admin = $userData && $userData['is_admin'];
 } catch (Exception $e) {
     Response::error('Authentication required', 401);
 }
 
 // Get global variables from index.php
 global $method, $path_parts;
-
-$conn = getDbConnection();
 
 // Get ID from path if present
 $id = $path_parts[1] ?? null;
@@ -91,6 +96,44 @@ switch ($method) {
             
         } else {
             // Get all templates for reseller
+            $templates = [];
+            
+            // Se for ADMIN, buscar templates de revendedores também
+            if ($is_admin) {
+                // Buscar templates para revendedores (reseller_whatsapp_templates)
+                $stmt = $conn->prepare("
+                    SELECT 
+                        id,
+                        name,
+                        trigger_type as type,
+                        trigger_type as trigger_event,
+                        message,
+                        is_active,
+                        created_at,
+                        updated_at,
+                        'reseller' as template_category,
+                        NULL as days_offset,
+                        NULL as send_hour,
+                        NULL as send_minute,
+                        NULL as use_global_schedule,
+                        0 as is_default,
+                        NULL as has_media,
+                        NULL as media_url,
+                        NULL as media_type
+                    FROM reseller_whatsapp_templates
+                    WHERE is_active = TRUE
+                    ORDER BY 
+                        FIELD(trigger_type, 'welcome', 'payment_confirmed', 'expiring_7days', 'expiring_3days', 'expiring_1day', 'expired'),
+                        created_at DESC
+                ");
+                $stmt->execute();
+                $resellerTemplates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                // Adicionar aos templates
+                $templates = array_merge($templates, $resellerTemplates);
+            }
+            
+            // Buscar templates normais (para clientes)
             $filters = [];
             $params = [$reseller_id];
             
@@ -130,7 +173,10 @@ switch ($method) {
             }
             
             $stmt = $conn->prepare("
-                SELECT * FROM whatsapp_templates 
+                SELECT 
+                    *,
+                    'client' as template_category
+                FROM whatsapp_templates 
                 WHERE {$whereClause}
                 ORDER BY 
                     is_default DESC,
@@ -139,7 +185,10 @@ switch ($method) {
                     created_at DESC
             ");
             $stmt->execute($params);
-            $templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $clientTemplates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            // Adicionar templates de clientes
+            $templates = array_merge($templates, $clientTemplates);
             
             Response::json($templates);
         }

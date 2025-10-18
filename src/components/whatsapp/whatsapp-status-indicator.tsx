@@ -18,6 +18,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import { useWhatsApp } from "@/hooks/use-whatsapp";
+import { useAuth } from "@/hooks/use-auth";
 
 interface WhatsAppStatusIndicatorProps {
   showDetails?: boolean;
@@ -30,7 +31,8 @@ export function WhatsAppStatusIndicator({
   size = "md",
   className = "",
 }: WhatsAppStatusIndicatorProps) {
-  const { status, isLoading, error, checkStatus } = useWhatsApp();
+  const { user } = useAuth();
+  const { status, isLoading, error, checkStatus } = useWhatsApp(user?.reseller_id);
 
   const getStatusColor = () => {
     if (isLoading) return "bg-yellow-100 text-yellow-800 border-yellow-200";

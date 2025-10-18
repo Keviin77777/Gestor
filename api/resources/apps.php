@@ -9,6 +9,9 @@ require_once __DIR__ . '/../../database/config.php';
 $user = Auth::requireAuth();
 $reseller_id = $user['reseller_id'];
 
+// Get global variables from index.php
+global $method, $path_parts;
+
 // Get ID from path if present
 $id = $path_parts[1] ?? null;
 

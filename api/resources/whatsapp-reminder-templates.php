@@ -16,6 +16,12 @@ global $method, $path_parts;
 
 $conn = getDbConnection();
 
+// Verificar se é admin
+$stmt = $conn->prepare("SELECT is_admin FROM resellers WHERE id = ?");
+$stmt->execute([$reseller_id]);
+$userData = $stmt->fetch(PDO::FETCH_ASSOC);
+$is_admin = $userData && $userData['is_admin'];
+
 // Get ID from path if present
 $id = $path_parts[1] ?? null;
 $action = $path_parts[2] ?? null;
@@ -39,6 +45,7 @@ switch ($method) {
             $sampleData = [
                 '{{cliente_nome}}' => 'João Silva',
                 '{{cliente_usuario}}' => 'joao123',
+                '{{senha}}' => 'senha123',
                 '{{cliente_telefone}}' => '(11) 98765-4321',
                 '{{data_vencimento}}' => '15/11/2025',
                 '{{data_vencimento_extenso}}' => '15 de novembro de 2025',
@@ -50,6 +57,7 @@ switch ($method) {
                 '{{status_cliente}}' => 'Ativo',
                 '{{data_hoje}}' => date('d/m/Y'),
                 '{{hora_atual}}' => date('H:i'),
+                '{{link_pagamento}}' => 'https://exemplo.com/pagar/abc123',
             ];
             
             $preview = $template['message'];
@@ -58,11 +66,17 @@ switch ($method) {
                 $preview = str_ireplace('{' . trim($var, '{}') . '}', $value, $preview);
             }
             
-            Response::json([
-                'template' => $template,
+            // Garantir que a resposta tem o formato correto
+            $response = [
                 'preview' => $preview,
-                'sample_data' => $sampleData
-            ]);
+                'sample_data' => $sampleData,
+                'template' => $template
+            ];
+            
+            error_log("[Preview] Retornando preview para template {$id}");
+            error_log("[Preview] Preview length: " . strlen($preview));
+            
+            Response::json($response);
             
         } elseif ($id) {
             // Get single template
@@ -81,6 +95,53 @@ switch ($method) {
             
         } else {
             // Get all templates for reseller
+            $allTemplates = [];
+            
+            // Se for ADMIN, buscar templates para revendedores também
+            if ($is_admin) {
+                error_log("🔑 [Templates] Usuário é ADMIN - Buscando templates de revendedores");
+                
+                // Buscar templates para revendedores (reseller_whatsapp_templates)
+                $stmt = $conn->prepare("
+                    SELECT 
+                        id,
+                        name,
+                        trigger_type as type,
+                        trigger_type as trigger_event,
+                        message,
+                        is_active,
+                        created_at,
+                        updated_at,
+                        'reseller' as template_category,
+                        NULL as reseller_id,
+                        NULL as days_offset,
+                        NULL as send_hour,
+                        NULL as send_minute,
+                        NULL as use_global_schedule,
+                        0 as is_default,
+                        0 as has_media,
+                        NULL as media_url,
+                        NULL as media_type
+                    FROM reseller_whatsapp_templates
+                    WHERE is_active = TRUE
+                    ORDER BY 
+                        FIELD(trigger_type, 'welcome', 'payment_confirmed', 'expiring_7days', 'expiring_3days', 'expiring_1day', 'expired'),
+                        created_at DESC
+                ");
+                $stmt->execute();
+                $resellerTemplates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                
+                error_log("📋 [Templates] Encontrados " . count($resellerTemplates) . " templates de revendedores");
+                
+                // Adicionar categoria aos templates
+                foreach ($resellerTemplates as &$template) {
+                    $template['template_category'] = 'reseller';
+                }
+                
+                $allTemplates = array_merge($allTemplates, $resellerTemplates);
+            }
+            
+            // Buscar templates normais (para clientes)
             $filters = [];
             $params = [$reseller_id];
             
@@ -120,7 +181,10 @@ switch ($method) {
             }
             
             $stmt = $conn->prepare("
-                SELECT * FROM whatsapp_templates 
+                SELECT 
+                    *,
+                    'client' as template_category
+                FROM whatsapp_templates 
                 WHERE {$whereClause}
                 ORDER BY 
                     is_default DESC,
@@ -129,9 +193,16 @@ switch ($method) {
                     created_at DESC
             ");
             $stmt->execute($params);
-            $templates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $clientTemplates = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            Response::json($templates);
+            error_log("📋 [Templates] Encontrados " . count($clientTemplates) . " templates de clientes");
+            
+            // Adicionar templates de clientes
+            $allTemplates = array_merge($allTemplates, $clientTemplates);
+            
+            error_log("📋 [Templates] Total de templates retornados: " . count($allTemplates));
+            
+            Response::json($allTemplates);
         }
         break;
         

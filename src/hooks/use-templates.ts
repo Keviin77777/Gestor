@@ -4,8 +4,8 @@ export interface WhatsAppTemplate {
   id: string;
   reseller_id: string;
   name: string;
-  type: 'welcome' | 'invoice' | 'renewal' | 'reminder_before' | 'reminder_due' | 'reminder_after' | 'data_send' | 'payment_link' | 'custom';
-  trigger_event: 'user_created' | 'invoice_generated' | 'invoice_paid' | 'scheduled' | 'manual';
+  type: 'welcome' | 'invoice' | 'renewal' | 'reminder_before' | 'reminder_due' | 'reminder_after' | 'data_send' | 'payment_link' | 'custom' | 'expiring_7days' | 'expiring_3days' | 'expiring_1day' | 'expired' | 'payment_confirmed';
+  trigger_event: 'user_created' | 'invoice_generated' | 'invoice_paid' | 'scheduled' | 'manual' | 'expiring_7days' | 'expiring_3days' | 'expiring_1day' | 'expired' | 'payment_confirmed';
   message: string;
   has_media: boolean;
   media_url: string | null;
@@ -18,6 +18,7 @@ export interface WhatsAppTemplate {
   use_global_schedule: boolean;
   created_at: string;
   updated_at: string;
+  template_category?: 'client' | 'reseller'; // Categoria do template (cliente ou revendedor)
 }
 
 interface UseTemplatesOptions {
@@ -52,12 +53,10 @@ export function useTemplates(options: UseTemplatesOptions = {}) {
       if (filters?.search) params.append('search', filters.search);
 
       const queryString = params.toString();
-      const url = `/api/whatsapp/reminder-templates${queryString ? `?${queryString}` : ''}`;
+      const url = `/api/whatsapp-reminder-templates${queryString ? `?${queryString}` : ''}`;
       
       const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+        credentials: 'include', // Usar cookies de sessão ao invés de Bearer token
       });
 
       if (!response.ok) {
@@ -97,12 +96,12 @@ export function useTemplates(options: UseTemplatesOptions = {}) {
     try {
       console.log('Creating template:', templateData);
       
-      const response = await fetch('/api/whatsapp/reminder-templates', {
+      const response = await fetch('/api/whatsapp-reminder-templates', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
+        credentials: 'include', // Usar cookies de sessão
         body: JSON.stringify(templateData),
       });
 
@@ -129,12 +128,12 @@ export function useTemplates(options: UseTemplatesOptions = {}) {
     try {
       console.log('Updating template:', id, templateData);
       
-      const response = await fetch(`/api/whatsapp/reminder-templates/${id}`, {
+      const response = await fetch(`/api/whatsapp-reminder-templates/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
+        credentials: 'include', // Usar cookies de sessão
         body: JSON.stringify(templateData),
       });
 
@@ -165,11 +164,9 @@ export function useTemplates(options: UseTemplatesOptions = {}) {
     try {
       console.log('Deleting template:', id);
       
-      const response = await fetch(`/api/whatsapp/reminder-templates/${id}`, {
+      const response = await fetch(`/api/whatsapp-reminder-templates/${id}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+        credentials: 'include', // Usar cookies de sessão
       });
 
       if (!response.ok) {
@@ -220,10 +217,8 @@ export function useTemplates(options: UseTemplatesOptions = {}) {
 
   const getPreview = useCallback(async (id: string) => {
     try {
-      const response = await fetch(`/api/whatsapp/reminder-templates/${id}?action=preview`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
+      const response = await fetch(`/api/whatsapp-reminder-templates/${id}/preview`, {
+        credentials: 'include', // Usar cookies de sessão
       });
 
       if (!response.ok) {

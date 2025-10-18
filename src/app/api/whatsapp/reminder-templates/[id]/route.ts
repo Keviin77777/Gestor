@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_PHP_API_URL || 'http://localhost/api';
+const API_BASE_URL = process.env.NEXT_PUBLIC_PHP_API_URL || 'http://localhost:8080';
 
 export async function GET(
   request: NextRequest,

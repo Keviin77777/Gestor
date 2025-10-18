@@ -34,7 +34,7 @@ import {
   PowerOff,
 } from "lucide-react";
 import { useTemplates, WhatsAppTemplate } from "@/hooks/use-templates";
-import { getTypeLabel, getTypeIcon, getTypeColor } from "@/lib/template-constants";
+import { getTypeLabel, getTypeIcon, getTypeColor, getTypeBadgeClasses } from "@/lib/template-constants";
 import { TemplateEditorModal } from "@/components/whatsapp/template-editor-modal";
 
 export default function TemplatesPage() {
@@ -54,6 +54,7 @@ export default function TemplatesPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterCategory, setFilterCategory] = useState<string>("all");
   const [saveResult, setSaveResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<WhatsAppTemplate | null>(null);
@@ -67,8 +68,11 @@ export default function TemplatesPage() {
     const matchesStatus = filterStatus === "all" || 
                          (filterStatus === "active" && template.is_active) ||
                          (filterStatus === "inactive" && !template.is_active);
+    const matchesCategory = filterCategory === "all" || 
+                           (filterCategory === "client" && template.template_category === "client") ||
+                           (filterCategory === "reseller" && template.template_category === "reseller");
     
-    return matchesSearch && matchesType && matchesStatus;
+    return matchesSearch && matchesType && matchesStatus && matchesCategory;
   });
 
   const handleToggle = async (id: string, currentStatus: boolean) => {
@@ -201,7 +205,7 @@ export default function TemplatesPage() {
       )}
 
       {/* Estatísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium">Total</CardTitle>
@@ -224,11 +228,25 @@ export default function TemplatesPage() {
         
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium">Padrão</CardTitle>
+            <CardTitle className="text-sm font-medium">Para Clientes</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{stats.default}</div>
-            <p className="text-xs text-muted-foreground">do sistema</p>
+            <div className="text-2xl font-bold text-blue-600">
+              {templates.filter(t => t.template_category === 'client').length}
+            </div>
+            <p className="text-xs text-muted-foreground">mensagens aos clientes</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Para Revendedores</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">
+              {templates.filter(t => t.template_category === 'reseller').length}
+            </div>
+            <p className="text-xs text-muted-foreground">mensagens aos revendedores</p>
           </CardContent>
         </Card>
         
@@ -267,7 +285,7 @@ export default function TemplatesPage() {
             <select
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
-              className="px-3 py-2 border rounded-md"
+              className="px-3 py-2 border rounded-md bg-background text-foreground border-border"
             >
               <option value="all">Todos os tipos</option>
               <option value="welcome">Boas-vindas</option>
@@ -283,11 +301,22 @@ export default function TemplatesPage() {
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
-              className="px-3 py-2 border rounded-md"
+              className="px-3 py-2 border rounded-md bg-background text-foreground border-border"
             >
               <option value="all">Todos os status</option>
               <option value="active">Ativos</option>
               <option value="inactive">Inativos</option>
+            </select>
+            
+            {/* Filtro por Categoria */}
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              className="px-3 py-2 border rounded-md bg-background text-foreground border-border"
+            >
+              <option value="all">Todas categorias</option>
+              <option value="client">Para Clientes</option>
+              <option value="reseller">Para Revendedores (ADMIN)</option>
             </select>
           </div>
         </CardContent>
@@ -336,12 +365,19 @@ export default function TemplatesPage() {
                 </thead>
                 <tbody>
                   {filteredTemplates.map((template) => (
-                    <tr key={template.id} className="border-b hover:bg-gray-50">
+                    <tr key={template.id} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800">
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           <span className="text-2xl">{getTypeIcon(template.type)}</span>
                           <div>
-                            <div className="font-medium">{template.name}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{template.name}</span>
+                              {template.template_category === 'reseller' && (
+                                <Badge variant="outline" className="bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-400/25 dark:text-orange-300 dark:border-orange-500/60 text-xs">
+                                  ADMIN
+                                </Badge>
+                              )}
+                            </div>
                             <div className="text-sm text-muted-foreground line-clamp-1">
                               {template.message.substring(0, 60)}...
                             </div>
@@ -349,18 +385,24 @@ export default function TemplatesPage() {
                         </div>
                       </td>
                       <td className="p-3">
-                        <Badge variant="outline" className={`bg-${getTypeColor(template.type)}-50`}>
+                        <Badge variant="outline" className={getTypeBadgeClasses(template.type)}>
                           {getTypeLabel(template.type)}
                         </Badge>
                       </td>
                       <td className="p-3 text-center">
-                        <Badge variant={template.has_media ? "default" : "secondary"}>
+                        <Badge 
+                          variant="outline" 
+                          className={template.has_media 
+                            ? "bg-green-100 text-green-800 border-green-200 dark:bg-green-400/25 dark:text-green-300 dark:border-green-500/60 dark:font-semibold"
+                            : "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-400/25 dark:text-gray-300 dark:border-gray-500/60 dark:font-semibold"
+                          }
+                        >
                           {template.has_media ? "SIM" : "NÃO"}
                         </Badge>
                       </td>
                       <td className="p-3 text-center">
                         {template.is_default ? (
-                          <Badge variant="outline" className="bg-blue-50">✓</Badge>
+                          <Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-400/25 dark:text-blue-300 dark:border-blue-500/60 dark:font-semibold">✓</Badge>
                         ) : (
                           <span className="text-muted-foreground">-</span>
                         )}

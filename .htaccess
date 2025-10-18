@@ -1,0 +1,21 @@
+RewriteEngine On
+
+# Redirecionar requisições da API para a pasta api/
+RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+
+# Headers CORS para toda a aplicação
+Header always set Access-Control-Allow-Origin "*"
+Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+
+# Responder a requisições OPTIONS
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^api/(.*)$ api/index.php [QSA,L]
+
+# Log de debug para webhooks (remover em produção)
+RewriteCond %{REQUEST_URI} ^/api/webhooks/
+RewriteRule .* - [E=webhook_debug:1]
+
+# Force redirect for ngrok
+RewriteCond %{HTTP_HOST} \.ngrok-free\.dev$
+RewriteRule ^api/(.*)$ api/index.php [QSA,L]

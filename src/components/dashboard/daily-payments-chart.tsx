@@ -134,17 +134,17 @@ export function DailyPaymentsChart({ invoices }: DailyPaymentsChartProps) {
     <Card className="border-0 shadow-xl bg-gradient-to-br from-white via-slate-50 to-slate-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 hover:shadow-2xl transition-all duration-300 overflow-hidden">
       {/* Header */}
       <CardHeader className="pb-4 space-y-4">
-        <div className="flex items-start justify-between">
-          <div className="space-y-2">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="space-y-2 flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-amber-500/20 backdrop-blur-sm">
+              <div className="p-2 rounded-lg bg-amber-500/20 backdrop-blur-sm flex-shrink-0">
                 <DollarSign className="h-5 w-5 text-amber-400" />
               </div>
-              <CardTitle className="text-xl font-headline font-bold text-slate-900 dark:text-white">
+              <CardTitle className="text-lg sm:text-xl font-headline font-bold text-slate-900 dark:text-white">
                 Pagamentos Por Dia
               </CardTitle>
             </div>
-            <p className="text-sm text-slate-600 dark:text-slate-400">
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
               Faturamento diário do período selecionado
             </p>
           </div>
@@ -152,11 +152,11 @@ export function DailyPaymentsChart({ invoices }: DailyPaymentsChartProps) {
             <PopoverTrigger asChild>
               <Button
                 variant="outline"
-                className="bg-amber-50 dark:bg-slate-800/50 border-amber-200 dark:border-slate-700 text-amber-700 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-slate-700/50 hover:text-amber-900 dark:hover:text-white backdrop-blur-sm shadow-sm"
+                className="bg-amber-50 dark:bg-slate-800/50 border-amber-200 dark:border-slate-700 text-amber-700 dark:text-slate-300 hover:bg-amber-100 dark:hover:bg-slate-700/50 hover:text-amber-900 dark:hover:text-white backdrop-blur-sm shadow-sm w-full sm:w-auto flex-shrink-0"
               >
-                <Calendar className="h-3 w-3 mr-2" />
-                {months[selectedMonth]} {selectedYear}
-                <ChevronDown className="h-3 w-3 ml-2" />
+                <Calendar className="h-4 w-4 mr-2" />
+                <span className="text-sm">{months[selectedMonth]} {selectedYear}</span>
+                <ChevronDown className="h-4 w-4 ml-2" />
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-80 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700" align="end">

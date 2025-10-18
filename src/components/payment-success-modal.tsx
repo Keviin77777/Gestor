@@ -69,24 +69,24 @@ export function PaymentSuccessModal({ isOpen, onClose, data }: PaymentSuccessMod
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl w-[95vw] max-h-[95vh] overflow-hidden flex flex-col p-0 gap-0">
-        <DialogHeader className="px-6 py-4 bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 dark:from-green-950 dark:via-emerald-950 dark:to-teal-950 border-b relative overflow-hidden">
+      <DialogContent className="max-w-4xl w-[95vw] sm:w-[90vw] max-h-[95vh] overflow-hidden flex flex-col p-0 gap-0">
+        <DialogHeader className="px-4 sm:px-6 py-3 sm:py-4 bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 dark:from-green-950 dark:via-emerald-950 dark:to-teal-950 border-b relative overflow-hidden">
           {/* Sparkles Animation */}
           <div className="absolute inset-0 pointer-events-none">
             <Sparkles className="absolute top-2 right-4 h-4 w-4 text-green-400 animate-pulse" />
             <Sparkles className="absolute top-6 right-12 h-3 w-3 text-emerald-400 animate-pulse delay-300" />
             <Sparkles className="absolute top-4 right-20 h-2 w-2 text-teal-400 animate-pulse delay-700" />
           </div>
-          <DialogTitle className="flex items-center gap-3 text-xl font-bold relative z-10">
-            <div className="p-2 bg-green-100 dark:bg-green-900 rounded-full animate-pulse">
-              <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+          <DialogTitle className="flex items-center gap-2 sm:gap-3 text-base sm:text-xl font-bold relative z-10">
+            <div className="p-1.5 sm:p-2 bg-green-100 dark:bg-green-900 rounded-full animate-pulse flex-shrink-0">
+              <CheckCircle className="h-5 w-5 sm:h-6 sm:w-6 text-green-600 dark:text-green-400" />
             </div>
-            <div>
-              <div className="text-green-800 dark:text-green-200">
+            <div className="min-w-0 flex-1">
+              <div className="text-green-800 dark:text-green-200 text-sm sm:text-base leading-tight">
                 Pagamento Processado com Sucesso!
               </div>
-              <div className="text-sm text-green-600 dark:text-green-400 font-normal">
-                Fatura #{data.invoice_id.substring(0, 8)} &nbsp;•&nbsp; {formatCurrency(data.value)}
+              <div className="text-xs sm:text-sm text-green-600 dark:text-green-400 font-normal truncate">
+                Fatura #{data.invoice_id.substring(0, 8)} • {formatCurrency(data.value)}
               </div>
             </div>
           </DialogTitle>
@@ -95,46 +95,46 @@ export function PaymentSuccessModal({ isOpen, onClose, data }: PaymentSuccessMod
         <div className="flex-1 overflow-y-auto">
           <div className="p-6 space-y-6">
             {/* Resumo do Pagamento - Cards Modernos */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
               <Card className="border-green-200 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 transform hover:scale-105 transition-all duration-200 hover:shadow-lg">
-                <CardContent className="p-4 text-center">
-                  <div className="text-2xl font-bold text-green-700 dark:text-green-300">
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <div className="text-lg sm:text-2xl font-bold text-green-700 dark:text-green-300">
                     {formatCurrency(data.value)}
                   </div>
-                  <div className="text-sm text-green-600 dark:text-green-400 font-medium">
+                  <div className="text-xs sm:text-sm text-green-600 dark:text-green-400 font-medium">
                     Valor Pago
                   </div>
                 </CardContent>
               </Card>
               
               <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950 dark:to-indigo-950 transform hover:scale-105 transition-all duration-200 hover:shadow-lg">
-                <CardContent className="p-4 text-center">
-                  <div className="text-lg font-bold text-blue-700 dark:text-blue-300 truncate">
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <div className="text-sm sm:text-lg font-bold text-blue-700 dark:text-blue-300 truncate">
                     {data.client_name}
                   </div>
-                  <div className="text-sm text-blue-600 dark:text-blue-400 font-medium">
+                  <div className="text-xs sm:text-sm text-blue-600 dark:text-blue-400 font-medium">
                     Cliente
                   </div>
                 </CardContent>
               </Card>
               
               <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-950 dark:to-violet-950 transform hover:scale-105 transition-all duration-200 hover:shadow-lg">
-                <CardContent className="p-4 text-center">
-                  <div className="text-lg font-mono font-bold text-purple-700 dark:text-purple-300">
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <div className="text-sm sm:text-lg font-mono font-bold text-purple-700 dark:text-purple-300">
                     #{data.invoice_id.substring(0, 8)}
                   </div>
-                  <div className="text-sm text-purple-600 dark:text-purple-400 font-medium">
+                  <div className="text-xs sm:text-sm text-purple-600 dark:text-purple-400 font-medium">
                     Fatura
                   </div>
                 </CardContent>
               </Card>
               
               <Card className="border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950 dark:to-teal-950 transform hover:scale-105 transition-all duration-200 hover:shadow-lg">
-                <CardContent className="p-4 text-center">
-                  <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200 text-sm px-3 py-1">
+                <CardContent className="p-3 sm:p-4 text-center">
+                  <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200 text-xs sm:text-sm px-2 sm:px-3 py-1">
                     ✓ Pago
                   </Badge>
-                  <div className="text-sm text-emerald-600 dark:text-emerald-400 font-medium mt-1">
+                  <div className="text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 font-medium mt-1">
                     Status
                   </div>
                 </CardContent>
@@ -159,13 +159,13 @@ export function PaymentSuccessModal({ isOpen, onClose, data }: PaymentSuccessMod
                 </CardHeader>
                 <CardContent className="space-y-6 p-6">
                   {/* Template de Confirmação */}
-                  <div className="bg-white dark:bg-gray-800 p-5 rounded-xl border-2 border-dashed border-blue-200 dark:border-blue-800 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
+                  <div className="bg-white dark:bg-gray-800 p-3 sm:p-5 rounded-xl border-2 border-dashed border-blue-200 dark:border-blue-800 shadow-sm">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
                       <div className="flex items-center gap-2">
-                        <div className="p-1.5 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                        <div className="p-1.5 bg-blue-100 dark:bg-blue-900 rounded-lg flex-shrink-0">
                           <Copy className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                         </div>
-                        <h4 className="font-bold text-gray-800 dark:text-gray-200">Confirmação de Renovação</h4>
+                        <h4 className="font-bold text-sm sm:text-base text-gray-800 dark:text-gray-200">Confirmação de Renovação</h4>
                       </div>
                       <Button
                         size="sm"
@@ -174,20 +174,20 @@ export function PaymentSuccessModal({ isOpen, onClose, data }: PaymentSuccessMod
                             `*Confirmação de Renovação*\n\n✅ Usuário: ${data.client_name}\n🗓️ Próximo Vencimento: ${formatDateTime(data.new_renewal_date)}`,
                           "Template de Confirmação"
                         )}
-                        className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all duration-200 hover:shadow-lg"
+                        className="bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all duration-200 hover:shadow-lg w-full sm:w-auto"
                       >
                         <Copy className="h-3 w-3 mr-2" />
-                        {copiedItem === "Template de Confirmação" ? "✓ Copiado!" : "Copiar Template"}
+                        <span className="text-xs sm:text-sm">{copiedItem === "Template de Confirmação" ? "✓ Copiado!" : "Copiar Template"}</span>
                       </Button>
                     </div>
-                    <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-800 p-4 rounded-lg border font-mono leading-relaxed">
+                    <div className="text-xs sm:text-sm text-gray-700 dark:text-gray-300 whitespace-pre-line bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-800 p-3 sm:p-4 rounded-lg border font-mono leading-relaxed overflow-x-auto">
                       {sigmaData.customer_renew_confirmation_template || 
                         `*Confirmação de Renovação*\n\n✅ Usuário: ${data.client_name}\n🗓️ Próximo Vencimento: ${formatDateTime(data.new_renewal_date)}`}
                     </div>
                   </div>
 
                   {/* Informações do Cliente */}
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 gap-4 sm:gap-6">
                     <Card className="bg-gradient-to-br from-slate-50 to-gray-50 dark:from-slate-900 dark:to-gray-900 border-slate-200 dark:border-slate-700">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-sm font-bold text-slate-700 dark:text-slate-300 flex items-center gap-2">
@@ -266,64 +266,64 @@ export function PaymentSuccessModal({ isOpen, onClose, data }: PaymentSuccessMod
                       </CardHeader>
                       <CardContent className="space-y-4">
                         {sigmaData.m3u_url && (
-                          <div className="bg-white dark:bg-purple-800 p-4 rounded-xl border border-purple-200 dark:border-purple-600">
+                          <div className="bg-white dark:bg-purple-800 p-3 sm:p-4 rounded-xl border border-purple-200 dark:border-purple-600">
                             <div className="flex items-center gap-2 mb-2">
-                              <Monitor className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                              <span className="text-sm font-bold text-purple-800 dark:text-purple-200">M3U URL</span>
+                              <Monitor className="h-4 w-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+                              <span className="text-xs sm:text-sm font-bold text-purple-800 dark:text-purple-200">M3U URL</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <code className="text-xs bg-purple-50 dark:bg-purple-900 px-3 py-2 rounded-lg flex-1 font-mono text-purple-700 dark:text-purple-300 break-all">
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                              <code className="text-xs bg-purple-50 dark:bg-purple-900 px-2 sm:px-3 py-2 rounded-lg flex-1 font-mono text-purple-700 dark:text-purple-300 break-all overflow-x-auto">
                                 {sigmaData.m3u_url}
                               </code>
                               <Button
                                 size="sm"
                                 onClick={() => copyToClipboard(sigmaData.m3u_url, "M3U URL")}
-                                className="bg-purple-600 hover:bg-purple-700 text-white shadow-md transition-all duration-200 hover:shadow-lg"
+                                className="bg-purple-600 hover:bg-purple-700 text-white shadow-md transition-all duration-200 hover:shadow-lg flex-shrink-0"
                               >
                                 <Copy className="h-3 w-3 mr-1" />
-                                {copiedItem === "M3U URL" ? "✓" : "Copiar"}
+                                <span className="text-xs">{copiedItem === "M3U URL" ? "✓" : "Copiar"}</span>
                               </Button>
                             </div>
                           </div>
                         )}
                         {sigmaData.m3u_url_short && (
-                          <div className="bg-white dark:bg-purple-800 p-4 rounded-xl border border-purple-200 dark:border-purple-600">
+                          <div className="bg-white dark:bg-purple-800 p-3 sm:p-4 rounded-xl border border-purple-200 dark:border-purple-600">
                             <div className="flex items-center gap-2 mb-2">
-                              <Smartphone className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                              <span className="text-sm font-bold text-purple-800 dark:text-purple-200">M3U Curto</span>
+                              <Smartphone className="h-4 w-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+                              <span className="text-xs sm:text-sm font-bold text-purple-800 dark:text-purple-200">M3U Curto</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <code className="text-xs bg-purple-50 dark:bg-purple-900 px-3 py-2 rounded-lg flex-1 font-mono text-purple-700 dark:text-purple-300 break-all">
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                              <code className="text-xs bg-purple-50 dark:bg-purple-900 px-2 sm:px-3 py-2 rounded-lg flex-1 font-mono text-purple-700 dark:text-purple-300 break-all overflow-x-auto">
                                 {sigmaData.m3u_url_short}
                               </code>
                               <Button
                                 size="sm"
                                 onClick={() => copyToClipboard(sigmaData.m3u_url_short, "M3U Curto")}
-                                className="bg-purple-600 hover:bg-purple-700 text-white shadow-md transition-all duration-200 hover:shadow-lg"
+                                className="bg-purple-600 hover:bg-purple-700 text-white shadow-md transition-all duration-200 hover:shadow-lg flex-shrink-0"
                               >
                                 <Copy className="h-3 w-3 mr-1" />
-                                {copiedItem === "M3U Curto" ? "✓" : "Copiar"}
+                                <span className="text-xs">{copiedItem === "M3U Curto" ? "✓" : "Copiar"}</span>
                               </Button>
                             </div>
                           </div>
                         )}
                         {sigmaData.renew_url && (
-                          <div className="bg-white dark:bg-purple-800 p-4 rounded-xl border border-purple-200 dark:border-purple-600">
+                          <div className="bg-white dark:bg-purple-800 p-3 sm:p-4 rounded-xl border border-purple-200 dark:border-purple-600">
                             <div className="flex items-center gap-2 mb-2">
-                              <ExternalLink className="h-4 w-4 text-purple-600 dark:text-purple-400" />
-                              <span className="text-sm font-bold text-purple-800 dark:text-purple-200">Link de Renovação</span>
+                              <ExternalLink className="h-4 w-4 text-purple-600 dark:text-purple-400 flex-shrink-0" />
+                              <span className="text-xs sm:text-sm font-bold text-purple-800 dark:text-purple-200">Link de Renovação</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <code className="text-xs bg-purple-50 dark:bg-purple-900 px-3 py-2 rounded-lg flex-1 font-mono text-purple-700 dark:text-purple-300 break-all">
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                              <code className="text-xs bg-purple-50 dark:bg-purple-900 px-2 sm:px-3 py-2 rounded-lg flex-1 font-mono text-purple-700 dark:text-purple-300 break-all overflow-x-auto">
                                 {sigmaData.renew_url}
                               </code>
                               <Button
                                 size="sm"
                                 onClick={() => copyToClipboard(sigmaData.renew_url, "Link de Renovação")}
-                                className="bg-purple-600 hover:bg-purple-700 text-white shadow-md transition-all duration-200 hover:shadow-lg"
+                                className="bg-purple-600 hover:bg-purple-700 text-white shadow-md transition-all duration-200 hover:shadow-lg flex-shrink-0"
                               >
                                 <Copy className="h-3 w-3 mr-1" />
-                                {copiedItem === "Link de Renovação" ? "✓" : "Copiar"}
+                                <span className="text-xs">{copiedItem === "Link de Renovação" ? "✓" : "Copiar"}</span>
                               </Button>
                             </div>
                           </div>

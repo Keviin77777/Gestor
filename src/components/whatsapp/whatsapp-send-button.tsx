@@ -23,6 +23,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useWhatsApp } from "@/hooks/use-whatsapp";
+import { useAuth } from "@/hooks/use-auth";
 import type { Client } from "@/lib/definitions";
 
 interface WhatsAppSendButtonProps {
@@ -40,7 +41,8 @@ export function WhatsAppSendButton({
   dueDate,
   daysUntilDue,
 }: WhatsAppSendButtonProps) {
-  const { status, sendMessage, sendBillingMessage, sendReminderMessage } = useWhatsApp();
+  const { user } = useAuth();
+  const { status, sendMessage, sendBillingMessage, sendReminderMessage } = useWhatsApp(user?.reseller_id);
   const [isOpen, setIsOpen] = useState(false);
   const [customMessage, setCustomMessage] = useState("");
   const [isSending, setIsSending] = useState(false);

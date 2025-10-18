@@ -63,10 +63,35 @@ export class SigmaAPI {
         if (!response.ok) {
           const errorText = await response.text();
           
+          console.error('❌ Sigma API Error Response:', {
+            status: response.status,
+            statusText: response.statusText,
+            url: url,
+            errorText: errorText.substring(0, 500)
+          });
+          
           // If we get HTML, it might be the wrong endpoint
           if (contentType && contentType.includes('text/html')) {
             lastError = new Error(`Endpoint não encontrado: ${url}. Verifique se a URL do painel está correta.`);
             continue; // Try next URL
+          }
+          
+          // Try to parse error as JSON
+          let errorMessage = `Sigma API Error: ${response.status} - ${response.statusText}`;
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.message) {
+              errorMessage = `Sigma API Error: ${errorJson.message}`;
+            } else if (errorJson.error) {
+              errorMessage = `Sigma API Error: ${errorJson.error}`;
+            } else if (errorJson.errors) {
+              errorMessage = `Sigma API Error: ${JSON.stringify(errorJson.errors)}`;
+            }
+          } catch (e) {
+            // Not JSON, use text
+            if (errorText && errorText.length < 200) {
+              errorMessage = `Sigma API Error: ${errorText}`;
+            }
           }
           
           // Check for specific error messages
@@ -74,7 +99,7 @@ export class SigmaAPI {
             throw new Error('Token inválido ou expirado. Verifique se o token está correto e ainda é válido.');
           }
           
-          throw new Error(`Sigma API Error: ${response.status} - ${response.statusText}`);
+          throw new Error(errorMessage);
         }
 
         if (!contentType || !contentType.includes('application/json')) {
@@ -122,20 +147,75 @@ export class SigmaAPI {
         };
       }
 
+      // PRIMEIRO: Tentar buscar o usuário específico por username
+      console.log(`🔍 Buscando usuário específico: ${this.config.username}`);
+      
+      try {
+        const specificUser = await this.makeRequest(`user?username=${encodeURIComponent(this.config.username)}`);
+        
+        console.log('🔍 Resposta da busca específica:', specificUser);
+        
+        if (specificUser && specificUser.data && Array.isArray(specificUser.data) && specificUser.data.length > 0) {
+          const user = specificUser.data[0];
+          
+          console.log('✅ Usuário encontrado via busca específica!');
+          console.log('👤 Dados:', {
+            username: user.username,
+            userId: user.id,
+            name: user.name || 'N/A'
+          });
+          
+          return {
+            success: true,
+            userId: user.id
+          };
+        }
+      } catch (searchError) {
+        console.warn('⚠️ Busca específica falhou, tentando listagem geral...', searchError);
+      }
+
+      // FALLBACK: Buscar lista de todos os usuários
+      console.log('📋 Listando todos os usuários...');
       const users = await this.makeRequest('user');
       
+      console.log('📋 Usuários disponíveis no Sigma:', users.data?.map((u: any) => ({
+        id: u.id,
+        username: u.username,
+        name: u.name
+      })));
+      
       if (users && users.data && Array.isArray(users.data) && users.data.length > 0) {
-        // Find user by username or get first user
-        const user = users.data.find((u: any) => u.username === this.config.username) || users.data[0];
+        // IMPORTANTE: Buscar o usuário EXATO pelo username fornecido
+        // Isso garante que cada revenda use seu próprio userId
+        let user = users.data.find((u: any) => u.username === this.config.username);
+        
+        if (!user) {
+          console.warn(`⚠️ Usuário '${this.config.username}' não encontrado na lista.`);
+          console.warn('Usuários disponíveis:', users.data.map((u: any) => u.username));
+          
+          // Se não encontrar, retornar erro em vez de usar o primeiro
+          return {
+            success: false,
+            error: `Usuário '${this.config.username}' não encontrado. Usuários disponíveis: ${users.data.map((u: any) => u.username).join(', ')}`
+          };
+        }
+        
+        console.log('✅ Conexão estabelecida com Sigma');
+        console.log('👤 Usuário encontrado:', {
+          username: user.username,
+          userId: user.id,
+          name: user.name || 'N/A'
+        });
+        
         return {
           success: true,
-          userId: user.id
+          userId: user.id  // ID específico do usuário/revendedor
         };
       }
       
       return {
         success: false,
-        error: 'Nenhum usuário encontrado no painel'
+        error: 'Nenhum servidor encontrado no painel'
       };
     } catch (error) {
       let errorMessage = 'Erro desconhecido';
@@ -193,18 +273,51 @@ export class SigmaAPI {
       note: customerData.note || ''
     };
 
-    return this.makeRequest('customer/create', {
-      method: 'POST',
-      body: JSON.stringify(payload)
+    console.log('🔵 Sigma Create Customer - Payload:', JSON.stringify(payload, null, 2));
+    console.log('🔵 Sigma Config:', {
+      url: this.config.url,
+      username: this.config.username,
+      tokenLength: this.config.token?.length || 0
     });
+
+    try {
+      const result = await this.makeRequest('customer/create', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      console.log('✅ Sigma Create Customer - Success:', result);
+      return result;
+    } catch (error) {
+      console.error('❌ Sigma Create Customer - Error:', error);
+      throw error;
+    }
   }
 
   // Get customer by username
   async getCustomer(username: string): Promise<SigmaCustomer | null> {
     try {
       const response = await this.makeRequest(`customer?username=${encodeURIComponent(username)}`);
-      return response || null;
+      
+      // Handle different response formats
+      if (response && response.data) {
+        // If data is an array, return first item
+        if (Array.isArray(response.data) && response.data.length > 0) {
+          return response.data[0];
+        }
+        // If data is an object, return it
+        if (typeof response.data === 'object') {
+          return response.data;
+        }
+      }
+      
+      // If response is directly the customer object
+      if (response && response.username) {
+        return response;
+      }
+      
+      return null;
     } catch (error) {
+      console.error('getCustomer error:', error);
       return null;
     }
   }

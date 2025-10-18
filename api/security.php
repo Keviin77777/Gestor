@@ -403,44 +403,40 @@ class Auth {
      * Get current authenticated user from JWT
      */
     public static function getCurrentUser(): ?array {
-        // Handle both web server and CLI environments
+        // Tentar JWT primeiro (para compatibilidade futura)
         if (function_exists('getallheaders')) {
             $headers = getallheaders();
             $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
         } else {
-            // Fallback for CLI or when getallheaders() is not available
             $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['Authorization'] ?? '';
         }
         
-        if (empty($authHeader) || !preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
-            return null;
+        if (!empty($authHeader) && preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+            $token = $matches[1];
+            $payload = JWT::decode($token);
+            
+            if ($payload && isset($payload['reseller_id'])) {
+                return $payload;
+            }
         }
         
-        $token = $matches[1];
-        $payload = JWT::decode($token);
-        
-        if (!$payload || !isset($payload['reseller_id'])) {
-            return null;
+        // Fallback: usar sessão PHP (mais simples e compatível)
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
         }
         
-        return $payload;
+        if (isset($_SESSION['user']) && is_array($_SESSION['user'])) {
+            return $_SESSION['user'];
+        }
+        
+        return null;
     }
     
     /**
      * Require authentication
      */
     public static function requireAuth(): array {
-        // MODO DESENVOLVIMENTO - ativado temporariamente
-        $dev_mode = getenv('DEV_MODE') === 'true' || true; // Força modo dev
-        if ($dev_mode) {
-            return [
-                'reseller_id' => 'admin-user-001',
-                'email' => 'admin@admin.com',
-                'display_name' => 'Administrador'
-            ];
-        }
-        
-        // Código de produção
+        // Código de produção - autenticação real
         $user = self::getCurrentUser();
         
         if (!$user) {

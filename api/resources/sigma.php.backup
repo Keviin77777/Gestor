@@ -1,0 +1,574 @@
+<?php
+/**
+ * Sigma API Resource
+ * Handles Sigma IPTV integration operations
+ * Last updated: 2025-10-14 23:05
+ */
+
+// Force reload - clear any cached version
+if (function_exists('opcache_invalidate')) {
+    opcache_invalidate(__FILE__, true);
+}
+
+require_once __DIR__ . '/../security.php';
+require_once __DIR__ . '/../../database/config.php';
+
+// Verify authentication
+$user = Auth::requireAuth();
+$reseller_id = $user['reseller_id'];
+
+// Get method and action
+global $method, $path_parts;
+
+$action = $path_parts[1] ?? '';
+
+// DEBUG: Log para confirmar que o arquivo atualizado está sendo usado
+error_log("🔥 SIGMA.PHP ATUALIZADO - Versão 2025-10-14 23:10");
+error_log("🔥 Action recebida: $action");
+error_log("🔥 Method: $method");
+error_log("🔥 Path parts: " . json_encode($path_parts));
+
+// Get database connection
+try {
+    $db = getDbConnection();
+} catch (Exception $e) {
+    error_log('Database connection error: ' . $e->getMessage());
+    Response::error('Database connection failed', 500);
+    exit;
+}
+
+try {
+    if ($method === 'POST') {
+        handlePost($db, $reseller_id, $action);
+    } else {
+        Response::error('Method not allowed', 405);
+    }
+} catch (Exception $e) {
+    error_log('Sigma API Error: ' . $e->getMessage());
+    Response::error($e->getMessage(), 500);
+}
+
+/**
+ * Handle POST requests
+ */
+function handlePost($db, $reseller_id, $action) {
+    switch ($action) {
+        case 'sync-from-sigma':
+            syncFromSigma($db, $reseller_id);
+            break;
+        case 'test-connection':
+            testSigmaConnection($db, $reseller_id);
+            break;
+        case 'sync-client':
+            syncClient($db, $reseller_id);
+            break;
+        case 'packages':
+            getPackages($db, $reseller_id);
+            break;
+        default:
+            Response::error("Invalid action: $action", 400);
+    }
+}
+
+/**
+ * Sync customer data from Sigma
+ */
+function syncFromSigma($db, $reseller_id) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$input) {
+        Response::error('Invalid JSON input', 400);
+    }
+    
+    $username = $input['username'] ?? '';
+    $currentRenewalDate = $input['currentRenewalDate'] ?? '';
+    $sigmaConfig = $input['sigmaConfig'] ?? [];
+    
+    if (empty($username) || empty($currentRenewalDate) || empty($sigmaConfig)) {
+        Response::error('Missing required parameters: username, currentRenewalDate, sigmaConfig', 400);
+    }
+    
+    // Validate Sigma configuration
+    $errors = validateSigmaConfig($sigmaConfig);
+    if (!empty($errors)) {
+        Response::error('Invalid Sigma configuration: ' . implode(', ', $errors), 400);
+    }
+    
+    try {
+        // Make request to Sigma API
+        $sigmaResponse = makeSigmaRequest($sigmaConfig, "customer?username=" . urlencode($username));
+        
+        if (!$sigmaResponse || !isset($sigmaResponse['data']) || empty($sigmaResponse['data'])) {
+            Response::error("Cliente '$username' não encontrado no Sigma IPTV", 404);
+        }
+        
+        $customer = $sigmaResponse['data'][0] ?? $sigmaResponse['data'];
+        
+        // Extract expiration date
+        $sigmaExpirationDate = null;
+        if (isset($customer['expires_at_tz'])) {
+            $sigmaExpirationDate = $customer['expires_at_tz'];
+        } elseif (isset($customer['expires_at'])) {
+            $sigmaExpirationDate = $customer['expires_at'];
+        }
+        
+        if (!$sigmaExpirationDate) {
+            Response::error('Data de expiração não encontrada no Sigma', 400);
+        }
+        
+        // Convert to local date format
+        $sigmaDate = new DateTime($sigmaExpirationDate);
+        $localRenewalDate = $sigmaDate->format('Y-m-d');
+        
+        // Compare dates
+        $datesAreDifferent = $currentRenewalDate !== $localRenewalDate;
+        
+        Response::json([
+            'success' => true,
+            'updated' => $datesAreDifferent,
+            'oldDate' => $currentRenewalDate,
+            'newDate' => $localRenewalDate,
+            'sigmaData' => [
+                'expirationDate' => $sigmaExpirationDate,
+                'status' => $customer['status'] ?? 'UNKNOWN',
+                'fullData' => $customer
+            ]
+        ]);
+        
+    } catch (Exception $e) {
+        error_log('Sigma sync error: ' . $e->getMessage());
+        Response::error('Erro ao sincronizar com Sigma: ' . $e->getMessage(), 500);
+    }
+}
+
+/**
+ * Test Sigma connection
+ */
+function testSigmaConnection($db, $reseller_id) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$input) {
+        Response::error('Invalid JSON input', 400);
+    }
+    
+    $sigmaConfig = $input['sigmaConfig'] ?? [];
+    
+    if (empty($sigmaConfig)) {
+        Response::error('Missing sigmaConfig parameter', 400);
+    }
+    
+    // Validate Sigma configuration
+    $errors = validateSigmaConfig($sigmaConfig);
+    if (!empty($errors)) {
+        Response::error('Invalid Sigma configuration: ' . implode(', ', $errors), 400);
+    }
+    
+    try {
+        // If userId is manually provided, just validate the connection
+        if (!empty($sigmaConfig['userId'])) {
+            error_log("✅ userId fornecido manualmente: {$sigmaConfig['userId']}");
+            
+            // Test connection by listing packages
+            $packagesResponse = makeSigmaRequest($sigmaConfig, 'package');
+            
+            if (!$packagesResponse || !isset($packagesResponse['data'])) {
+                Response::error('Não foi possível validar a conexão com o Sigma', 400);
+            }
+            
+            Response::json([
+                'success' => true,
+                'userId' => $sigmaConfig['userId'],
+                'username' => $sigmaConfig['username'],
+                'message' => 'Conexão com Sigma estabelecida com sucesso (userId manual)',
+                'manualUserId' => true
+            ]);
+            return;
+        }
+        
+        $username = $sigmaConfig['username'];
+        
+        // First, try to search for the specific user by username
+        error_log("🔍 Buscando usuário específico: $username");
+        error_log("🔍 URL de busca: user?username=" . urlencode($username));
+        
+        try {
+            $specificUserResponse = makeSigmaRequest($sigmaConfig, 'user?username=' . urlencode($username));
+            
+            error_log("🔍 Resposta da busca específica (HTTP OK): " . json_encode($specificUserResponse));
+            
+            if ($specificUserResponse && isset($specificUserResponse['data']) && !empty($specificUserResponse['data'])) {
+                // Check if data is an array or single object
+                $userData = $specificUserResponse['data'];
+                
+                error_log("🔍 userData type: " . gettype($userData));
+                error_log("🔍 userData is_array: " . (is_array($userData) ? 'yes' : 'no'));
+                error_log("🔍 userData content: " . json_encode($userData));
+                
+                // Handle paginated response
+                if (is_array($userData) && isset($userData[0])) {
+                    $user = $userData[0];
+                    error_log("🔍 Usando userData[0]");
+                } else {
+                    $user = $userData;
+                    error_log("🔍 Usando userData direto");
+                }
+                
+                error_log("✅ Usuário encontrado via busca: " . json_encode([
+                    'username' => $user['username'] ?? 'N/A',
+                    'userId' => $user['id'] ?? 'N/A'
+                ]));
+                
+                Response::json([
+                    'success' => true,
+                    'userId' => $user['id'] ?? null,
+                    'username' => $user['username'] ?? null,
+                    'message' => 'Conexão com Sigma estabelecida com sucesso (busca específica)'
+                ]);
+                return;
+            }
+            
+            error_log("⚠️ Busca específica não retornou dados válidos");
+            error_log("⚠️ specificUserResponse: " . json_encode($specificUserResponse));
+            
+        } catch (Exception $e) {
+            error_log("❌ Erro na busca específica: " . $e->getMessage());
+            // Continue para o fallback
+        }
+        
+        // If not found via search, try listing all users
+        error_log("Usuário não encontrado via busca, listando todos os usuários...");
+        $sigmaResponse = makeSigmaRequest($sigmaConfig, 'user');
+        
+        if (!$sigmaResponse || !isset($sigmaResponse['data'])) {
+            Response::error('Resposta inválida do Sigma', 400);
+        }
+        
+        $users = $sigmaResponse['data'];
+        if (!is_array($users) || empty($users)) {
+            Response::error('Nenhum usuário encontrado no painel', 400);
+        }
+        
+        // Log available users
+        $availableUsernames = array_map(function($u) {
+            return $u['username'] ?? 'N/A';
+        }, $users);
+        error_log("Usuários disponíveis: " . implode(', ', $availableUsernames));
+        
+        // Find user by username in the list
+        $user = null;
+        foreach ($users as $u) {
+            if (isset($u['username']) && $u['username'] === $username) {
+                $user = $u;
+                break;
+            }
+        }
+        
+        if (!$user) {
+            // Provide helpful error message with suggestion to use manual userId
+            $errorMsg = "Usuário '$username' não encontrado na API. ";
+            $errorMsg .= "Usuários disponíveis: " . implode(', ', $availableUsernames) . ". ";
+            $errorMsg .= "Se '$username' é um sub-revendedor, informe o User ID manualmente no campo apropriado.";
+            
+            Response::error($errorMsg, 404);
+        }
+        
+        error_log("✅ Usuário encontrado na lista: " . json_encode([
+            'username' => $user['username'] ?? 'N/A',
+            'userId' => $user['id'] ?? 'N/A'
+        ]));
+        
+        Response::json([
+            'success' => true,
+            'userId' => $user['id'] ?? null,
+            'username' => $user['username'] ?? null,
+            'message' => 'Conexão com Sigma estabelecida com sucesso'
+        ]);
+        
+    } catch (Exception $e) {
+        error_log('Sigma connection test error: ' . $e->getMessage());
+        Response::error('Erro ao conectar com Sigma: ' . $e->getMessage(), 500);
+    }
+}
+
+
+
+/**
+ * Sync client with Sigma (create, renew, status, delete, get)
+ */
+function syncClient($db, $reseller_id) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$input) {
+        Response::error('Invalid JSON input', 400);
+    }
+    
+    $sigmaConfig = $input['sigmaConfig'] ?? [];
+    $action = $input['action'] ?? '';
+    $clientData = $input['clientData'] ?? [];
+    
+    if (empty($sigmaConfig) || empty($action)) {
+        Response::error('Missing required parameters: sigmaConfig, action', 400);
+    }
+    
+    // Validate Sigma configuration
+    $errors = validateSigmaConfig($sigmaConfig);
+    if (!empty($errors)) {
+        Response::error('Invalid Sigma configuration: ' . implode(', ', $errors), 400);
+    }
+    
+    try {
+        error_log("Sigma sync client - Action: $action");
+        error_log("Sigma sync client - Config: " . json_encode($sigmaConfig));
+        error_log("Sigma sync client - Client Data: " . json_encode($clientData));
+        
+        switch ($action) {
+            case 'create':
+                $result = createSigmaCustomer($sigmaConfig, $clientData);
+                break;
+            case 'renew':
+                $result = renewSigmaCustomer($sigmaConfig, $clientData);
+                break;
+            case 'status':
+                $result = updateSigmaCustomerStatus($sigmaConfig, $clientData);
+                break;
+            case 'delete':
+                $result = deleteSigmaCustomer($sigmaConfig, $clientData);
+                break;
+            case 'get':
+                $result = getSigmaCustomer($sigmaConfig, $clientData);
+                break;
+            default:
+                Response::error("Invalid action: $action", 400);
+        }
+        
+        Response::json([
+            'success' => true,
+            'data' => $result
+        ]);
+        
+    } catch (Exception $e) {
+        error_log('Sigma sync client error: ' . $e->getMessage());
+        Response::error('Erro ao sincronizar cliente com Sigma: ' . $e->getMessage(), 500);
+    }
+}
+
+/**
+ * Get packages from Sigma
+ */
+function getPackages($db, $reseller_id) {
+    $input = json_decode(file_get_contents('php://input'), true);
+    
+    if (!$input) {
+        Response::error('Invalid JSON input', 400);
+    }
+    
+    $sigmaConfig = $input;
+    
+    // Validate Sigma configuration
+    $errors = validateSigmaConfig($sigmaConfig);
+    if (!empty($errors)) {
+        Response::error('Invalid Sigma configuration: ' . implode(', ', $errors), 400);
+    }
+    
+    try {
+        $packages = makeSigmaRequest($sigmaConfig, 'package');
+        
+        Response::json([
+            'success' => true,
+            'data' => $packages['data'] ?? []
+        ]);
+        
+    } catch (Exception $e) {
+        error_log('Sigma get packages error: ' . $e->getMessage());
+        Response::error('Erro ao buscar pacotes do Sigma: ' . $e->getMessage(), 500);
+    }
+}
+
+/**
+ * Create customer in Sigma
+ */
+function createSigmaCustomer($config, $clientData) {
+    // Validate required fields
+    $requiredFields = ['userId', 'packageId', 'username', 'password'];
+    $missingFields = [];
+    
+    foreach ($requiredFields as $field) {
+        $value = ($field === 'userId') ? ($config[$field] ?? '') : ($clientData[$field] ?? '');
+        if (empty($value)) {
+            $missingFields[] = $field;
+        }
+    }
+    
+    if (!empty($missingFields)) {
+        throw new Exception('Campos obrigatórios faltando: ' . implode(', ', $missingFields));
+    }
+    
+    $payload = [
+        'userId' => $config['userId'],
+        'packageId' => $clientData['packageId'],
+        'username' => $clientData['username'],
+        'password' => $clientData['password'],
+        'name' => $clientData['name'] ?? '',
+        'email' => $clientData['email'] ?? '',
+        'whatsapp' => $clientData['whatsapp'] ?? '',
+        'note' => $clientData['note'] ?? ''
+    ];
+    
+    error_log('Sigma Create Customer Payload: ' . json_encode($payload));
+    
+    return makeSigmaRequest($config, 'customer/create', 'POST', $payload);
+}
+
+/**
+ * Renew customer in Sigma
+ */
+function renewSigmaCustomer($config, $clientData) {
+    $payload = [
+        'userId' => $config['userId'] ?? '',
+        'username' => $clientData['username'] ?? '',
+        'packageId' => $clientData['packageId'] ?? ''
+    ];
+    
+    return makeSigmaRequest($config, 'customer/renew', 'POST', $payload);
+}
+
+/**
+ * Update customer status in Sigma
+ */
+function updateSigmaCustomerStatus($config, $clientData) {
+    $payload = [
+        'userId' => $config['userId'] ?? '',
+        'username' => $clientData['username'] ?? '',
+        'status' => $clientData['status'] ?? 'ACTIVE'
+    ];
+    
+    return makeSigmaRequest($config, 'customer/status', 'PUT', $payload);
+}
+
+/**
+ * Delete customer in Sigma
+ */
+function deleteSigmaCustomer($config, $clientData) {
+    $payload = [
+        'userId' => $config['userId'] ?? '',
+        'username' => $clientData['username'] ?? ''
+    ];
+    
+    return makeSigmaRequest($config, 'customer', 'DELETE', $payload);
+}
+
+/**
+ * Get customer from Sigma
+ */
+function getSigmaCustomer($config, $clientData) {
+    $username = $clientData['username'] ?? '';
+    return makeSigmaRequest($config, 'customer?username=' . urlencode($username));
+}
+
+/**
+ * Make request to Sigma API (updated version)
+ */
+function makeSigmaRequest($config, $endpoint, $method = 'GET', $payload = null) {
+    // Remove trailing slash from URL
+    $baseUrl = rtrim($config['url'], '/');
+    
+    // If URL already ends with /api, just add /webhook/
+    // Otherwise add /api/webhook/
+    if (substr($baseUrl, -4) === '/api') {
+        $url = $baseUrl . '/webhook/' . ltrim($endpoint, '/');
+    } else {
+        $url = $baseUrl . '/api/webhook/' . ltrim($endpoint, '/');
+    }
+    
+    error_log("Sigma Request URL: $url");
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $config['token'],
+        'Content-Type: application/json',
+        'Accept: application/json'
+    ]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    
+    if ($method !== 'GET' && $payload !== null) {
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    }
+    
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
+    curl_close($ch);
+    
+    if ($error) {
+        throw new Exception('Erro de conexão: ' . $error);
+    }
+    
+    if ($httpCode < 200 || $httpCode >= 300) {
+        $errorMessage = "Sigma API Error: $httpCode";
+        
+        // Log the full response for debugging
+        error_log("Sigma API Error Response: " . $response);
+        
+        // Try to get more specific error from response
+        if ($response) {
+            $errorData = json_decode($response, true);
+            if ($errorData) {
+                if (isset($errorData['message'])) {
+                    $errorMessage = "Sigma API Error: " . $errorData['message'];
+                } elseif (isset($errorData['error'])) {
+                    $errorMessage = "Sigma API Error: " . $errorData['error'];
+                } elseif (isset($errorData['errors']) && is_array($errorData['errors'])) {
+                    $errorMessage = "Sigma API Error: " . implode(', ', $errorData['errors']);
+                }
+            } else {
+                // If not JSON, include raw response
+                $errorMessage = "Sigma API Error: $httpCode - " . substr($response, 0, 200);
+            }
+        }
+        
+        // Add specific guidance for common errors
+        if ($httpCode === 400) {
+            $errorMessage .= " (Verifique se todos os campos obrigatórios estão preenchidos: userId, packageId, username, password)";
+        } elseif ($httpCode === 401) {
+            $errorMessage .= " (Token inválido ou expirado)";
+        } elseif ($httpCode === 404) {
+            $errorMessage .= " (Endpoint não encontrado - verifique a URL do painel)";
+        }
+        
+        throw new Exception($errorMessage);
+    }
+    
+    $data = json_decode($response, true);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('Resposta inválida do Sigma: ' . json_last_error_msg());
+    }
+    
+    return $data;
+}
+
+/**
+ * Validate Sigma configuration
+ */
+function validateSigmaConfig($config) {
+    $errors = [];
+    
+    if (empty($config['url'])) {
+        $errors[] = 'URL do painel é obrigatória';
+    } elseif (!filter_var($config['url'], FILTER_VALIDATE_URL)) {
+        $errors[] = 'URL do painel inválida';
+    }
+    
+    if (empty($config['username'])) {
+        $errors[] = 'Usuário é obrigatório';
+    }
+    
+    if (empty($config['token'])) {
+        $errors[] = 'Token é obrigatório';
+    }
+    
+    return $errors;
+}

@@ -56,8 +56,8 @@ try {
             LEFT JOIN plans p ON c.plan_id = p.id
             WHERE c.reseller_id = ? 
             AND c.status = 'active'
-            AND DATEDIFF(c.renewal_date, CURDATE()) <= ?
-            AND DATEDIFF(c.renewal_date, CURDATE()) >= 0
+            AND DATEDIFF(c.renewal_date, DATE(CONVERT_TZ(NOW(), '+00:00', '-03:00'))) <= ?
+            AND DATEDIFF(c.renewal_date, DATE(CONVERT_TZ(NOW(), '+00:00', '-03:00'))) >= 0
         ");
         $stmt->execute([$reseller_id, $daysBeforeExpiry]);
         $clients = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -100,21 +100,38 @@ try {
                 
                 // Criar fatura
                 $invoice_id = 'inv_auto_' . time() . '_' . substr(md5($client_id . $renewal_date), 0, 8);
-                $issue_date = date('Y-m-d');
+                $invoice_date = date('Y-m-d');
                 $discount = 0;
                 $final_value = $value - $discount;
                 
+                // Gerar número sequencial da fatura
+                $stmt = $conn->prepare("
+                    SELECT invoice_number FROM invoices 
+                    WHERE reseller_id = ? AND invoice_number IS NOT NULL 
+                    ORDER BY created_at DESC LIMIT 1
+                ");
+                $stmt->execute([$reseller_id]);
+                $lastInvoice = $stmt->fetch(PDO::FETCH_ASSOC);
+                
+                if ($lastInvoice && $lastInvoice['invoice_number']) {
+                    $lastNumber = intval($lastInvoice['invoice_number']);
+                    $invoice_number = str_pad($lastNumber + 1, 6, '0', STR_PAD_LEFT);
+                } else {
+                    $invoice_number = '000001';
+                }
+                
                 $stmt = $conn->prepare("
                     INSERT INTO invoices 
-                    (id, reseller_id, client_id, date, due_date, value, final_value, status, notes, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())
+                    (id, reseller_id, client_id, invoice_number, date, due_date, value, final_value, status, notes, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, NOW(), NOW())
                 ");
                 
                 $result = $stmt->execute([
                     $invoice_id,
                     $reseller_id,
                     $client_id,
-                    $issue_date,
+                    $invoice_number,
+                    $invoice_date,
                     $renewal_date,
                     $value,
                     $final_value,
@@ -190,16 +207,109 @@ function sendInvoiceWhatsApp($conn, $reseller_id, $invoice_id, $client, $due_dat
         return;
     }
     
-    // Formatar data
+    // Processar variáveis do template (todas as variáveis disponíveis)
     $dueDateObj = new DateTime($due_date);
-    $formatted_date = $dueDateObj->format('d/m/Y');
+    $current_date = new DateTime();
+    $current_hour = $current_date->format('H:i');
+    $client_value = floatval($value);
     
-    // Substituir variáveis
+    // Formatar data por extenso
+    $months = [
+        1 => 'janeiro', 2 => 'fevereiro', 3 => 'março', 4 => 'abril',
+        5 => 'maio', 6 => 'junho', 7 => 'julho', 8 => 'agosto',
+        9 => 'setembro', 10 => 'outubro', 11 => 'novembro', 12 => 'dezembro'
+    ];
+    $data_extenso = $dueDateObj->format('j') . ' de ' . $months[(int)$dueDateObj->format('n')] . ' de ' . $dueDateObj->format('Y');
+    
+    // Status do cliente
+    $status_map = [
+        'active' => 'Ativo',
+        'inactive' => 'Inativo',
+        'suspended' => 'Suspenso',
+        'cancelled' => 'Cancelado'
+    ];
+    $status_cliente = $status_map[$client['status']] ?? 'Ativo';
+    
+    // Gerar link de pagamento
+    $payment_link = '';
+    try {
+        // Buscar método de pagamento padrão ativo
+        $stmt = $conn->prepare("
+            SELECT * FROM payment_methods 
+            WHERE reseller_id = ? AND is_active = 1 AND is_default = 1
+            LIMIT 1
+        ");
+        $stmt->execute([$reseller_id]);
+        $payment_method = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($payment_method) {
+            // Gerar link baseado no método
+            $app_url = getenv('APP_URL') ?: 'http://localhost:9002';
+            
+            // TODO: Adicionar suporte para geração automática de links aqui no futuro
+            // Por enquanto, links são gerados apenas na criação manual de faturas
+        }
+    } catch (Exception $e) {
+        error_log("      ⚠️  Erro ao gerar link de pagamento: " . $e->getMessage());
+    }
+    
+    // Determinar referência baseada no mês
+    $referencia = 'Mensalidade - ' . strtolower($months[(int)$dueDateObj->format('n')]) . ' ' . $dueDateObj->format('Y');
+    
+    // Mapa completo de variáveis
+    $variables = [
+        // Cliente
+        'CLIENT_NAME' => $client['name'] ?? '',
+        'cliente_nome' => $client['name'] ?? '',
+        'CLIENT_PHONE' => $client['phone'] ?? '',
+        'cliente_telefone' => $client['phone'] ?? '',
+        'USERNAME' => $client['username'] ?? '',
+        'cliente_usuario' => $client['username'] ?? '',
+        
+        // Datas
+        'DUE_DATE' => $dueDateObj->format('d/m/Y'),
+        'data_vencimento' => $dueDateObj->format('d/m/Y'),
+        'data_vencimento_extenso' => $data_extenso,
+        'ano_vencimento' => $dueDateObj->format('Y'),
+        'mes_vencimento' => $months[(int)$dueDateObj->format('n')],
+        'CURRENT_DATE' => $current_date->format('d/m/Y'),
+        'data_hoje' => $current_date->format('d/m/Y'),
+        'data_atual' => $current_date->format('d/m/Y'),
+        'hora_atual' => $current_hour,
+        
+        // Valores
+        'AMOUNT' => number_format($client_value, 2, ',', '.'),
+        'valor' => number_format($client_value, 2, ',', '.'),
+        'valor_numerico' => number_format($client_value, 2, '.', ''),
+        'DISCOUNT_VALUE' => '0,00',
+        'desconto' => '0,00',
+        'FINAL_VALUE' => number_format($client_value, 2, ',', '.'),
+        'valor_final' => number_format($client_value, 2, ',', '.'),
+        
+        // Plano/Sistema
+        'PLAN_NAME' => $client['plan_name'] ?? 'Plano',
+        'plano' => $client['plan_name'] ?? 'Plano',
+        'plano_nome' => $client['plan_name'] ?? 'Plano',
+        'status_cliente' => $status_cliente,
+        'CLIENT_STATUS' => $status_cliente,
+        'BUSINESS_NAME' => 'GestPlay',
+        'empresa_nome' => 'GestPlay',
+        
+        // Referência
+        'referencia' => $referencia,
+        'REFERENCE' => $referencia,
+        
+        // Link de pagamento
+        'link_pagamento' => $payment_link ?: 'Link não disponível',
+        'link_fatura' => $payment_link ?: 'Link não disponível',
+        'PAYMENT_LINK' => $payment_link ?: 'Link não disponível',
+    ];
+    
+    // Substituir todas as variáveis
     $message = $template['message'];
-    $message = str_replace('{{cliente_nome}}', $client['name'], $message);
-    $message = str_replace('{{data_vencimento}}', $formatted_date, $message);
-    $message = str_replace('{{valor}}', number_format($value, 2, ',', '.'), $message);
-    $message = str_replace('{{plano}}', $client['plan_name'] ?? 'Plano', $message);
+    foreach ($variables as $key => $value) {
+        $message = str_replace('{{' . $key . '}}', $value, $message);
+    }
     
     // Formatar telefone
     $phone = preg_replace('/\D/', '', $client['phone']);

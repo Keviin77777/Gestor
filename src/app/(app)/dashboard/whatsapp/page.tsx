@@ -27,8 +27,18 @@ import {
 } from "lucide-react";
 import { useWhatsApp } from "@/hooks/use-whatsapp";
 import { useClients } from "@/hooks/use-clients";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function WhatsAppPage() {
+  const { user, loading: authLoading } = useAuth();
+  
+  // Log para debug
+  React.useEffect(() => {
+    console.log('👤 [WhatsAppPage] User:', user);
+    console.log('👤 [WhatsAppPage] Reseller ID:', user?.reseller_id);
+    console.log('👤 [WhatsAppPage] Auth Loading:', authLoading);
+  }, [user, authLoading]);
+  
   const {
     status,
     isLoading,
@@ -36,8 +46,23 @@ export default function WhatsAppPage() {
     connect,
     disconnect,
     sendMessage,
-    sendBillingMessage,
-  } = useWhatsApp();
+  } = useWhatsApp(user?.reseller_id);
+  
+  // Wrapper para connect que valida se o user está carregado
+  const handleConnect = async () => {
+    if (authLoading) {
+      alert('⏳ Aguarde... Carregando informações do usuário.');
+      return;
+    }
+    
+    if (!user?.reseller_id) {
+      alert('❌ Erro: Não foi possível identificar sua conta. Faça login novamente.');
+      return;
+    }
+    
+    console.log(`✅ [WhatsAppPage] Conectando com reseller_id: ${user.reseller_id}`);
+    await connect();
+  };
 
   // Buscar clientes reais do sistema
   const { data: systemClients } = useClients();
@@ -47,97 +72,121 @@ export default function WhatsAppPage() {
     client.phone && client.phone.trim().length > 0
   ) || [];
 
+
+
   const sendTestMessage = async () => {
+    if (!status.connected) {
+      alert("⚠️ WhatsApp não está conectado! Por favor, conecte primeiro.");
+      return;
+    }
+
+    const testNumber = prompt("Digite o número para teste (com DDD, ex: 11999999999):");
+    if (!testNumber) return;
+
     try {
       await sendMessage({
-        to: "5511999999999", // Número de teste
+        to: testNumber,
         message: "🧪 Mensagem de teste do GestPlay!\n\nSe você recebeu esta mensagem, a integração está funcionando perfeitamente! ✅",
         type: "text",
       });
-      alert("Mensagem de teste enviada com sucesso!");
+      alert("✅ Mensagem de teste enviada com sucesso!");
     } catch (error) {
-      alert("Erro ao enviar mensagem de teste: " + (error as Error).message);
+      const errorMsg = (error as Error).message;
+      alert(`❌ Erro ao enviar mensagem de teste:\n\n${errorMsg}\n\nDica: Aguarde alguns segundos após conectar antes de enviar mensagens.`);
+      console.error("Erro detalhado:", error);
     }
   };
 
+
+
   return (
-    <div className="space-y-6">
+    <div className="container-responsive space-y-responsive">
       {/* Header */}
       <div className="space-y-2">
-        <h1 className="text-3xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
+        <h1 className="text-responsive-2xl font-bold bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
           WhatsApp Business
         </h1>
-        <p className="text-muted-foreground">
+        <p className="text-muted-foreground text-responsive-base">
           Conecte seu WhatsApp para enviar cobranças automáticas aos clientes
         </p>
       </div>
 
+      {/* Loading Auth Alert */}
+      {authLoading && (
+        <Alert className="bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800">
+          <RefreshCw className="h-4 w-4 animate-spin text-blue-600 dark:text-blue-400" />
+          <AlertDescription className="text-blue-800 dark:text-blue-200">
+            Carregando informações da sua conta... Aguarde antes de conectar o WhatsApp.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {/* Status Card */}
       <Card className="border-0 shadow-lg">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`p-3 rounded-full ${status.connected ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}>
-                <MessageCircle className="h-6 w-6" />
+        <CardHeader className="p-responsive">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className={`p-2 sm:p-3 rounded-full flex-shrink-0 ${status.connected ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'}`}>
+                <MessageCircle className="h-5 w-5 sm:h-6 sm:w-6" />
               </div>
-              <div>
-                <CardTitle className="flex items-center gap-2">
-                  Status da Conexão
+              <div className="min-w-0 flex-1">
+                <CardTitle className="flex flex-col sm:flex-row sm:items-center gap-2 text-responsive-lg">
+                  <span className="truncate">Status da Conexão</span>
                   {status.connected ? (
-                    <Badge variant="default" className="bg-green-100 text-green-800 border-green-200">
+                    <Badge variant="default" className="bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-200 border-green-200 dark:border-green-800 w-fit">
                       <Wifi className="h-3 w-3 mr-1" />
                       Conectado
                     </Badge>
                   ) : (
-                    <Badge variant="secondary" className="bg-red-100 text-red-800 border-red-200">
+                    <Badge variant="secondary" className="bg-red-100 dark:bg-red-900/50 text-red-800 dark:text-red-200 border-red-200 dark:border-red-800 w-fit">
                       <WifiOff className="h-3 w-3 mr-1" />
                       Desconectado
                     </Badge>
                   )}
                 </CardTitle>
-                <CardDescription>
+                <CardDescription className="text-responsive-sm truncate">
                   {status.connected
                     ? `Conectado como ${status.phoneNumber}`
                     : "WhatsApp não está conectado"}
                 </CardDescription>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               {status.connected ? (
                 <>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={sendTestMessage}
-                    className="gap-2"
+                    className="gap-2 btn-responsive flex-1 sm:flex-initial"
                     disabled={isLoading}
                   >
                     <Send className="h-4 w-4" />
-                    Teste
+                    <span className="hide-mobile">Teste</span>
                   </Button>
                   <Button
                     variant="destructive"
                     size="sm"
                     onClick={disconnect}
-                    className="gap-2"
+                    className="gap-2 btn-responsive flex-1 sm:flex-initial"
                     disabled={isLoading}
                   >
                     <XCircle className="h-4 w-4" />
-                    Desconectar
+                    <span className="hide-mobile">Desconectar</span>
                   </Button>
                 </>
               ) : (
                 <Button
-                  onClick={connect}
-                  disabled={isLoading}
-                  className="gap-2 bg-green-600 hover:bg-green-700"
+                  onClick={handleConnect}
+                  disabled={isLoading || authLoading}
+                  className="gap-2 bg-green-600 hover:bg-green-700 btn-responsive w-full sm:w-auto"
                 >
-                  {isLoading ? (
+                  {isLoading || authLoading ? (
                     <RefreshCw className="h-4 w-4 animate-spin" />
                   ) : (
                     <QrCode className="h-4 w-4" />
                   )}
-                  {isLoading ? "Conectando..." : "Conectar WhatsApp"}
+                  {authLoading ? "Carregando..." : isLoading ? "Conectando..." : "Conectar WhatsApp"}
                 </Button>
               )}
             </div>
@@ -146,30 +195,36 @@ export default function WhatsAppPage() {
 
         {status.connected && (
           <CardContent>
+            <Alert className="mb-4 bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-800">
+              <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+              <AlertDescription className="text-green-800 dark:text-green-200">
+                ✅ WhatsApp conectado! Aguarde alguns segundos antes de enviar mensagens para garantir estabilidade da conexão.
+              </AlertDescription>
+            </Alert>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
-                <CheckCircle className="h-5 w-5 text-green-600" />
+              <div className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-950/50 rounded-lg">
+                <CheckCircle className="h-5 w-5 text-green-600 dark:text-green-400" />
                 <div>
-                  <p className="font-medium text-green-900">Conectado</p>
-                  <p className="text-sm text-green-700">
+                  <p className="font-medium text-green-900 dark:text-green-100">Conectado</p>
+                  <p className="text-sm text-green-700 dark:text-green-300">
                     Última atividade: {status.lastSeen}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
-                <Users className="h-5 w-5 text-blue-600" />
+              <div className="flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-950/50 rounded-lg">
+                <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
                 <div>
-                  <p className="font-medium text-blue-900">Clientes</p>
-                  <p className="text-sm text-blue-700">
+                  <p className="font-medium text-blue-900 dark:text-blue-100">Clientes</p>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
                     {clientsWithWhatsApp.length} de {systemClients?.length || 0} com WhatsApp
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-purple-50 rounded-lg">
-                <Zap className="h-5 w-5 text-purple-600" />
+              <div className="flex items-center gap-3 p-3 bg-purple-50 dark:bg-purple-950/50 rounded-lg">
+                <Zap className="h-5 w-5 text-purple-600 dark:text-purple-400" />
                 <div>
-                  <p className="font-medium text-purple-900">Automação</p>
-                  <p className="text-sm text-purple-700">Ativa</p>
+                  <p className="font-medium text-purple-900 dark:text-purple-100">Automação</p>
+                  <p className="text-sm text-purple-700 dark:text-purple-300">Ativa</p>
                 </div>
               </div>
             </div>
@@ -188,6 +243,8 @@ export default function WhatsAppPage() {
         )}
       </Card>
 
+
+
       {/* QR Code Card */}
       {status.qrCode && (
         <Card className="border-0 shadow-lg">
@@ -201,7 +258,7 @@ export default function WhatsAppPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col items-center space-y-4">
-            <div className="p-4 bg-white rounded-lg border-2 border-dashed border-gray-300">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
               <img 
                 src={status.qrCode} 
                 alt="QR Code WhatsApp" 
@@ -248,30 +305,30 @@ export default function WhatsAppPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="text-center p-4 bg-blue-50 rounded-lg">
-                <div className="text-2xl font-bold text-blue-600">{systemClients.length}</div>
-                <div className="text-sm text-blue-700">Total de Clientes</div>
+              <div className="text-center p-4 bg-blue-50 dark:bg-blue-950/50 rounded-lg">
+                <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{systemClients.length}</div>
+                <div className="text-sm text-blue-700 dark:text-blue-300">Total de Clientes</div>
               </div>
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <div className="text-2xl font-bold text-green-600">{clientsWithWhatsApp.length}</div>
-                <div className="text-sm text-green-700">Com WhatsApp</div>
+              <div className="text-center p-4 bg-green-50 dark:bg-green-950/50 rounded-lg">
+                <div className="text-2xl font-bold text-green-600 dark:text-green-400">{clientsWithWhatsApp.length}</div>
+                <div className="text-sm text-green-700 dark:text-green-300">Com WhatsApp</div>
               </div>
-              <div className="text-center p-4 bg-orange-50 rounded-lg">
-                <div className="text-2xl font-bold text-orange-600">
+              <div className="text-center p-4 bg-orange-50 dark:bg-orange-950/50 rounded-lg">
+                <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
                   {systemClients.length - clientsWithWhatsApp.length}
                 </div>
-                <div className="text-sm text-orange-700">Sem WhatsApp</div>
+                <div className="text-sm text-orange-700 dark:text-orange-300">Sem WhatsApp</div>
               </div>
             </div>
             
             {clientsWithWhatsApp.length > 0 && (
-              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm font-medium text-gray-700 mb-2">
+              <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Cobertura WhatsApp: {Math.round((clientsWithWhatsApp.length / systemClients.length) * 100)}%
                 </p>
-                <div className="w-full bg-gray-200 rounded-full h-2">
+                <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                   <div 
-                    className="bg-green-500 h-2 rounded-full transition-all duration-300"
+                    className="bg-green-500 dark:bg-green-400 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${(clientsWithWhatsApp.length / systemClients.length) * 100}%` }}
                   ></div>
                 </div>
@@ -349,46 +406,46 @@ export default function WhatsAppPage() {
       </div>
 
       {/* Instructions Card */}
-      <Card className="border-0 shadow-lg bg-gradient-to-r from-blue-50 to-green-50">
+      <Card className="border-0 shadow-lg bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/50 dark:to-green-950/50">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-blue-600" />
+            <AlertTriangle className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             Como Funciona
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h4 className="font-semibold mb-3">Configuração Inicial</h4>
+              <h4 className="font-semibold mb-3 dark:text-white">Configuração Inicial</h4>
               <ol className="space-y-2 text-sm">
                 <li className="flex items-start gap-2">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
-                  <span>Clique em "Conectar WhatsApp"</span>
+                  <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
+                  <span className="dark:text-gray-300">Clique em "Conectar WhatsApp"</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
-                  <span>Escaneie o QR Code com seu celular</span>
+                  <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
+                  <span className="dark:text-gray-300">Escaneie o QR Code com seu celular</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="bg-blue-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
-                  <span>Aguarde a confirmação da conexão</span>
+                  <span className="bg-blue-600 dark:bg-blue-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
+                  <span className="dark:text-gray-300">Aguarde a confirmação da conexão</span>
                 </li>
               </ol>
             </div>
             <div>
-              <h4 className="font-semibold mb-3">Envio Automático</h4>
+              <h4 className="font-semibold mb-3 dark:text-white">Envio Automático</h4>
               <ol className="space-y-2 text-sm">
                 <li className="flex items-start gap-2">
-                  <span className="bg-green-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
-                  <span>Configure os números dos clientes</span>
+                  <span className="bg-green-600 dark:bg-green-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">1</span>
+                  <span className="dark:text-gray-300">Configure os números dos clientes</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="bg-green-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
-                  <span>Gere as cobranças normalmente</span>
+                  <span className="bg-green-600 dark:bg-green-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">2</span>
+                  <span className="dark:text-gray-300">Gere as cobranças normalmente</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="bg-green-600 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
-                  <span>As mensagens serão enviadas automaticamente</span>
+                  <span className="bg-green-600 dark:bg-green-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">3</span>
+                  <span className="dark:text-gray-300">As mensagens serão enviadas automaticamente</span>
                 </li>
               </ol>
             </div>

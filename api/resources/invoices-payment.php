@@ -173,12 +173,18 @@ try {
     }
     
     // Send WhatsApp renewal confirmation if client has phone
+    error_log("WhatsApp Debug - Checking conditions for WhatsApp send");
+    error_log("WhatsApp Debug - client_id: " . ($invoice['client_id'] ?? 'NULL'));
+    error_log("WhatsApp Debug - client_phone: " . ($invoice['client_phone'] ?? 'NULL'));
+    error_log("WhatsApp Debug - reseller_id: " . $reseller_id);
+    
     if ($invoice['client_id'] && $invoice['client_phone']) {
         try {
             error_log("WhatsApp Debug - Starting WhatsApp notification");
             error_log("WhatsApp Debug - client_phone: " . $invoice['client_phone']);
             
             // Get renewal template from database
+            error_log("WhatsApp Debug - Searching for template with reseller_id: " . $reseller_id);
             $stmt = $conn->prepare("
                 SELECT message 
                 FROM whatsapp_templates 
@@ -188,16 +194,80 @@ try {
             $stmt->execute([$reseller_id]);
             $template = $stmt->fetch(PDO::FETCH_ASSOC);
             
+            error_log("WhatsApp Debug - Template found: " . ($template ? 'YES' : 'NO'));
+            
             if ($template) {
-                // Format date for display
-                $formatted_date = date('d/m/Y', strtotime($new_renewal_date));
+                // Processar variáveis do template (todas as variáveis disponíveis)
+                $renewal_date = new DateTime($new_renewal_date);
+                $current_date = new DateTime();
+                $current_hour = $current_date->format('H:i');
+                $client_value = floatval($invoice['value']);
                 
-                // Replace template variables
+                // Formatar data por extenso
+                $months = [
+                    1 => 'janeiro', 2 => 'fevereiro', 3 => 'março', 4 => 'abril',
+                    5 => 'maio', 6 => 'junho', 7 => 'julho', 8 => 'agosto',
+                    9 => 'setembro', 10 => 'outubro', 11 => 'novembro', 12 => 'dezembro'
+                ];
+                $data_extenso = $renewal_date->format('j') . ' de ' . $months[(int)$renewal_date->format('n')] . ' de ' . $renewal_date->format('Y');
+                
+                // Status do cliente (assumir ativo após pagamento)
+                $status_cliente = 'Ativo';
+                
+                // Mapa completo de variáveis
+                $variables = [
+                    // Cliente
+                    'CLIENT_NAME' => $invoice['client_name'] ?? '',
+                    'cliente_nome' => $invoice['client_name'] ?? '',
+                    'CLIENT_PHONE' => $invoice['client_phone'] ?? '',
+                    'cliente_telefone' => $invoice['client_phone'] ?? '',
+                    'USERNAME' => $invoice['client_username'] ?? '',
+                    'cliente_usuario' => $invoice['client_username'] ?? '',
+                    
+                    // Datas
+                    'DUE_DATE' => $renewal_date->format('d/m/Y'),
+                    'data_vencimento' => $renewal_date->format('d/m/Y'),
+                    'data_vencimento_extenso' => $data_extenso,
+                    'ano_vencimento' => $renewal_date->format('Y'),
+                    'mes_vencimento' => $months[(int)$renewal_date->format('n')],
+                    'CURRENT_DATE' => $current_date->format('d/m/Y'),
+                    'data_hoje' => $current_date->format('d/m/Y'),
+                    'data_atual' => $current_date->format('d/m/Y'),
+                    'hora_atual' => $current_hour,
+                    
+                    // Valores
+                    'AMOUNT' => number_format($client_value, 2, ',', '.'),
+                    'valor' => number_format($client_value, 2, ',', '.'),
+                    'valor_numerico' => number_format($client_value, 2, '.', ''),
+                    'DISCOUNT_VALUE' => '0,00',
+                    'desconto' => '0,00',
+                    'FINAL_VALUE' => number_format($client_value, 2, ',', '.'),
+                    'valor_final' => number_format($client_value, 2, ',', '.'),
+                    
+                    // Plano/Sistema
+                    'PLAN_NAME' => $invoice['plan_name'] ?? 'Plano',
+                    'plano' => $invoice['plan_name'] ?? 'Plano',
+                    'plano_nome' => $invoice['plan_name'] ?? 'Plano',
+                    'status_cliente' => $status_cliente,
+                    'CLIENT_STATUS' => $status_cliente,
+                    'BUSINESS_NAME' => 'GestPlay',
+                    'empresa_nome' => 'GestPlay',
+                    
+                    // Referência (para pagamento confirmado)
+                    'referencia' => $invoice['description'] ?? 'Renovação',
+                    'REFERENCE' => $invoice['description'] ?? 'Renovação',
+                    
+                    // Link de pagamento (não aplicável para pagamento confirmado)
+                    'link_pagamento' => 'Pagamento já realizado',
+                    'link_fatura' => 'Pagamento já realizado',
+                    'PAYMENT_LINK' => 'Pagamento já realizado',
+                ];
+                
+                // Substituir todas as variáveis
                 $message = $template['message'];
-                $message = str_replace('{{cliente_nome}}', $invoice['client_name'], $message);
-                $message = str_replace('{{data_vencimento}}', $formatted_date, $message);
-                $message = str_replace('{{valor}}', number_format($invoice['value'], 2, ',', '.'), $message);
-                $message = str_replace('{{plano}}', $invoice['plan_name'] ?? 'Plano', $message);
+                foreach ($variables as $key => $value) {
+                    $message = str_replace('{{' . $key . '}}', $value, $message);
+                }
                 
                 error_log("WhatsApp Debug - Message: " . $message);
                 
@@ -216,12 +286,24 @@ try {
                 $whatsapp_key = getenv('WHATSAPP_API_KEY') ?: '';
                 
                 if ($whatsapp_url && $whatsapp_key) {
+                    // Extrair ID numérico do reseller_id
+                    $cleanId = $reseller_id;
+                    if (strpos($cleanId, 'reseller_') === 0) {
+                        $cleanId = substr($cleanId, 9); // Remove "reseller_"
+                    }
+                    // Extrair apenas números do início
+                    preg_match('/^(\d+)/', $cleanId, $matches);
+                    $numericId = $matches[1] ?? $cleanId;
+                    $instanceName = "reseller_{$numericId}";
+                    
+                    error_log("Renewal WhatsApp - Using instance: {$instanceName} (from {$reseller_id})");
+                    
                     $whatsapp_data = [
                         'number' => $phone,
                         'text' => $message
                     ];
                     
-                    $whatsapp_url = rtrim($whatsapp_url, '/') . '/message/sendText/gestplay-instance';
+                    $whatsapp_url = rtrim($whatsapp_url, '/') . "/message/sendText/{$instanceName}";
                     $whatsapp_post = json_encode($whatsapp_data);
                     
                     error_log("WhatsApp Debug - URL: " . $whatsapp_url);
@@ -267,6 +349,8 @@ try {
             $response['whatsapp_sent'] = false;
             $response['whatsapp_error'] = $e->getMessage();
         }
+    } else {
+        error_log("WhatsApp Debug - Skipping WhatsApp send - client_id or phone missing");
     }
     
     $conn->commit();

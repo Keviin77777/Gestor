@@ -46,6 +46,9 @@ next-env.d.ts
 .env.production.local
 .env.evolution
 
+# Keep example files
+!.env.example
+
 # firebase
 firebase-debug.log
 firestore-debug.log
@@ -87,3 +90,16 @@ pids/
 
 # Docker
 docker-compose.override.yml
+
+# WhatsApp Sessions (contém dados sensíveis)
+scripts/whatsapp-sessions/
+*.data.json
+auth_info_baileys/
+
+# Database backups
+*.sql.gz
+database/backups/
+
+# Uploads
+uploads/
+public/uploads/

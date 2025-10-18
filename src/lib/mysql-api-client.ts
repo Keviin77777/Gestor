@@ -220,10 +220,10 @@ class MySQLApiClient {
   /**
    * Register new user
    */
-  async register(email: string, password: string, displayName?: string): Promise<{ token: string; user: User }> {
+  async register(email: string, password: string, displayName?: string, whatsapp?: string): Promise<{ token: string; user: User }> {
     const data = await this.request<{ token: string; user: User }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, display_name: displayName }),
+      body: JSON.stringify({ email, password, display_name: displayName, whatsapp }),
     });
 
     if (data.token) {

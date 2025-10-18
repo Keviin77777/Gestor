@@ -49,8 +49,12 @@ switch ($method) {
     case 'POST':
         $data = json_decode(file_get_contents('php://input'), true);
         
+        error_log('[Panels POST] Dados recebidos: ' . json_encode($data));
+        error_log('[Panels POST] reseller_id: ' . $reseller_id);
+        
         // Validar dados obrigatórios
         if (empty($data['name'])) {
+            error_log('[Panels POST] Erro: Nome vazio');
             Response::error('Nome é obrigatório');
         }
         
@@ -64,6 +68,8 @@ switch ($method) {
             mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
         );
         
+        error_log('[Panels POST] ID gerado: ' . $panel_id);
+        
         try {
             executeQuery(
                 "INSERT INTO panels (id, reseller_id, name, monthly_cost, renewal_date, 
@@ -76,7 +82,7 @@ switch ($method) {
                     $data['name'],
                     floatval($data['monthly_cost'] ?? 0),
                     $data['renewal_date'] ?? null,
-                    isset($data['sigma_connected']) ? (bool)$data['sigma_connected'] : false,
+                    isset($data['sigma_connected']) ? (int)(bool)$data['sigma_connected'] : 0,
                     $data['sigma_url'] ?? null,
                     $data['sigma_username'] ?? null,
                     $data['sigma_token'] ?? null,
@@ -85,10 +91,12 @@ switch ($method) {
                 ]
             );
             
+            error_log('[Panels POST] Painel criado com sucesso: ' . $panel_id);
             Response::success(['id' => $panel_id, 'message' => 'Painel criado com sucesso'], 201);
         } catch (Exception $e) {
-            error_log('Error creating panel: ' . $e->getMessage());
-            Response::error('Erro ao criar painel', 500);
+            error_log('[Panels POST] Erro ao criar painel: ' . $e->getMessage());
+            error_log('[Panels POST] Stack trace: ' . $e->getTraceAsString());
+            Response::error('Erro ao criar painel: ' . $e->getMessage(), 500);
         }
         break;
         

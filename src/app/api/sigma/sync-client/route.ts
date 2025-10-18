@@ -21,6 +21,33 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'create':
+        // Validar userId antes de criar
+        if (!sigmaConfig.userId) {
+          return NextResponse.json({ 
+            success: false, 
+            error: 'User ID não configurado. Por favor, teste a conexão primeiro para obter o User ID correto do seu usuário no Sigma.'
+          }, { status: 400 });
+        }
+        
+        console.log('Creating customer with config:', {
+          userId: sigmaConfig.userId,
+          username: sigmaConfig.username,
+          packageId: clientData.packageId,
+          customerUsername: clientData.username
+        });
+        
+        // Check if customer already exists
+        const existingCustomer = await sigmaAPI.getCustomer(clientData.username);
+        if (existingCustomer) {
+          console.log('Customer already exists:', existingCustomer);
+          return NextResponse.json({ 
+            success: false, 
+            error: `Cliente '${clientData.username}' já existe no Sigma IPTV. Use a opção de sincronizar para atualizar os dados.`,
+            existingCustomer 
+          }, { status: 400 });
+        }
+        
+        console.log('Customer does not exist, creating...');
         const newCustomer = await sigmaAPI.createCustomer(
           sigmaConfig.userId,
           clientData.packageId,
@@ -33,6 +60,8 @@ export async function POST(request: NextRequest) {
             note: clientData.note
           }
         );
+        console.log('✅ Customer created successfully under user:', sigmaConfig.username);
+        console.log('Customer data:', newCustomer);
         return NextResponse.json({ success: true, data: newCustomer });
 
       case 'renew':

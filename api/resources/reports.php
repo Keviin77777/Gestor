@@ -400,7 +400,7 @@ function getDefaultersReport($db, $reseller_id) {
         $stmt = $db->prepare("
             SELECT 
                 id, name, email, phone, value, renewal_date, status,
-                DATEDIFF(CURDATE(), renewal_date) as days_overdue
+                DATEDIFF(DATE(CONVERT_TZ(NOW(), '+00:00', '-03:00')), renewal_date) as days_overdue
             FROM clients 
             WHERE reseller_id = ? 
             AND renewal_date < CURDATE()

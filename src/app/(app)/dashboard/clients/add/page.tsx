@@ -285,20 +285,20 @@ export default function AddClientPage() {
                   type="button"
                   variant="outline"
                   onClick={() => setIsAppsExpanded(!isAppsExpanded)}
-                  className="w-full justify-between h-auto p-4 border-2 border-dashed hover:border-solid hover:bg-muted/50 transition-all"
+                  className="w-full justify-between h-auto p-3 sm:p-4 border-2 border-dashed hover:border-solid hover:bg-muted/50 transition-all"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                      <Smartphone className="h-5 w-5 text-white" />
+                    <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                      <Smartphone className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
                     </div>
-                    <div className="text-left">
-                      <div className="font-medium">
+                    <div className="text-left min-w-0 flex-1">
+                      <div className="font-medium text-sm sm:text-base truncate">
                         {selectedApps.length > 0 
                           ? `Cliente usa ${selectedApps.length} aplicativo${selectedApps.length !== 1 ? 's' : ''}`
                           : 'Definir aplicativos do cliente'
                         }
                       </div>
-                      <div className="text-sm text-muted-foreground">
+                      <div className="text-xs sm:text-sm text-muted-foreground truncate">
                         {isAppsExpanded 
                           ? 'Clique para ocultar a lista' 
                           : `Selecione quais apps o cliente utiliza`
@@ -308,7 +308,7 @@ export default function AddClientPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {selectedApps.length > 0 && (
-                      <div className="flex -space-x-1">
+                      <div className="hidden sm:flex -space-x-1">
                         {selectedApps.slice(0, 3).map((_, index) => (
                           <div key={index} className="w-6 h-6 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center">
                             <div className="w-2 h-2 bg-white rounded-full"></div>

@@ -63,6 +63,7 @@ import { useMySQL } from "@/lib/mysql-provider";
 import { useClients } from "@/hooks/use-clients";
 import { usePlans } from "@/hooks/use-plans";
 import { usePanels } from "@/hooks/use-panels";
+import { useApps } from "@/hooks/use-apps";
 import { mysqlApi } from "@/lib/mysql-api-client";
 import { PaymentHistory } from "./payment-history";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -96,15 +97,13 @@ export function ClientTable() {
   const { data: clients, isLoading: clientsLoading, error: clientsError, refetch } = useClients();
   const { data: plans, isLoading: plansLoading, error: plansError } = usePlans();
   const { data: panels, isLoading: panelsLoading, error: panelsError } = usePanels();
+  const { data: apps, isLoading: appsLoading, error: appsError } = useApps();
 
   // Consider all loading states
-  const isLoading = clientsLoading || plansLoading || panelsLoading;
+  const isLoading = clientsLoading || plansLoading || panelsLoading || appsLoading;
 
   // Sigma Integration - must be called before any conditional returns
   const sigmaIntegration = useSigmaIntegration();
-
-  // Mock apps data for now - can be replaced with useApps hook when available
-  const apps: App[] = [];
 
   // Use invoices hook to get all invoices
   const { data: invoicesData, createInvoice: createInvoiceHook, refresh: refreshInvoices } = useInvoices();
@@ -115,6 +114,7 @@ export function ClientTable() {
 
   // WhatsApp automation hook
   const { sendBillingMessage } = useAutoWhatsApp({
+    resellerId: resellerId?.toString(), // Passar o ID do reseller
     showNotifications: false, // Usamos nossas próprias notificações
     onSuccess: (clientName, clientPhone) => {
       console.log(`✅ WhatsApp enviado com sucesso para ${clientName}`);
@@ -222,15 +222,7 @@ export function ClientTable() {
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Carregando dados...</p>
-          <p className="text-sm text-gray-500 mt-2">
-            Debug: clients={clientsLoading ? 'loading' : 'done'},
-            plans={plansLoading ? 'loading' : 'done'},
-            panels={panelsLoading ? 'loading' : 'done'}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Clientes: {clients?.length || 0}, Planos: {plans?.length || 0}, Painéis: {panels?.length || 0}
-          </p>
+          <p className="text-gray-600 dark:text-gray-400">Carregando clientes...</p>
         </div>
       </div>
     );
@@ -776,7 +768,7 @@ export function ClientTable() {
         name: client.name,
         whatsapp: client.phone,
         note: client.notes,
-        packageId: clientPlan.id // Using plan ID as package ID
+        packageId: clientPanel.sigma_default_package_id || "1" // Use configured package ID from panel
       });
 
       if (result.success) {
@@ -1082,23 +1074,29 @@ export function ClientTable() {
             <Table>
               <TableHeader>
                 <TableRow className="border-b border-border/50">
-                  <TableHead className="font-semibold">Cliente</TableHead>
-                  <TableHead className="font-semibold">Plano</TableHead>
-                  <TableHead className="font-semibold text-center">Status</TableHead>
-                  <TableHead className="font-semibold">
+                  <TableHead className="font-semibold w-[200px]">Cliente</TableHead>
+                  <TableHead className="font-semibold w-[120px]">Plano</TableHead>
+                  <TableHead className="font-semibold text-center w-[100px]">Status</TableHead>
+                  <TableHead className="font-semibold w-[140px]">
                     <div className="flex items-center gap-2">
                       <CalendarIcon className="h-4 w-4" />
                       Vencimento
                     </div>
                   </TableHead>
-                  <TableHead className="font-semibold text-right">Valor</TableHead>
-                  <TableHead className="font-semibold text-center">Painel</TableHead>
+                  <TableHead className="font-semibold text-center w-[180px]">
+                    <div className="flex items-center justify-center gap-2">
+                      <Smartphone className="h-4 w-4" />
+                      Aplicativos
+                    </div>
+                  </TableHead>
+                  <TableHead className="font-semibold text-right w-[100px]">Valor</TableHead>
+                  <TableHead className="font-semibold text-center w-[120px]">Painel</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12">
+                    <TableCell colSpan={7} className="text-center py-12">
                       <div className="flex flex-col items-center space-y-2">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                         <p className="text-muted-foreground">Carregando clientes...</p>
@@ -1176,6 +1174,27 @@ export function ClientTable() {
                           );
                         })()}
                       </TableCell>
+                      <TableCell className="text-center">
+                        {client.apps && client.apps.length > 0 ? (
+                          <div className="flex items-center justify-center gap-1">
+                            {client.apps.slice(0, 2).map((appId) => {
+                              const app = apps?.find(a => a.id === appId);
+                              return app ? (
+                                <Badge key={appId} variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300">
+                                  {app.name}
+                                </Badge>
+                              ) : null;
+                            })}
+                            {client.apps.length > 2 && (
+                              <Badge variant="outline" className="text-xs bg-gray-50 text-gray-600 border-gray-200">
+                                +{client.apps.length - 2}
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
                         <div className="text-lg font-semibold text-green-600 dark:text-green-400">
                           R$ {client.value.toFixed(2)}
@@ -1191,7 +1210,7 @@ export function ClientTable() {
                     {/* Expanded Client Details */}
                     {expandedClient === client.id && (
                       <TableRow>
-                        <TableCell colSpan={6} className="p-0">
+                        <TableCell colSpan={7} className="p-0">
                           <div className="bg-muted/30 p-6 border-t border-border/50">
                             <div className="space-y-6">
                               {/* Informações de Acesso */}
@@ -1329,7 +1348,7 @@ export function ClientTable() {
                 ))}
                 {!isLoading && (!clients || clients.length === 0) && (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center py-12">
+                    <TableCell colSpan={7} className="text-center py-12">
                       <div className="flex flex-col items-center space-y-4">
                         <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center">
                           <Users className="h-8 w-8 text-muted-foreground" />
@@ -1543,42 +1562,7 @@ export function ClientTable() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {/* Sigma IPTV Actions */}
-                            {(() => {
-                              const clientPlan = plans?.find(p => p.id === client.plan_id);
-                              const clientPanel = clientPlan ? panels?.find(p => p.id === clientPlan.panel_id) : null;
-                              const sigma_connected = clientPanel?.sigma_connected;
-
-                              if (sigma_connected && client.username) {
-                                return (
-                                  <>
-                                    <DropdownMenuItem
-                                      onClick={() => handleRenewClientSigma(client)}
-                                      disabled={sigmaIntegration.isLoading}
-                                    >
-                                      <RefreshCw className="mr-2 h-4 w-4" />
-                                      Renovar no Sigma
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => handleSyncClientStatus(client)}
-                                      disabled={sigmaIntegration.isLoading}
-                                    >
-                                      <Wifi className="mr-2 h-4 w-4" />
-                                      Sincronizar Status
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={() => handleSyncFromSigma(client)}
-                                      disabled={sigmaIntegration.isLoading}
-                                    >
-                                      <RefreshCw className="mr-2 h-4 w-4" />
-                                      Sincronizar do Sigma
-                                    </DropdownMenuItem>
-                                  </>
-                                );
-                              }
-                              return null;
-                            })()}
-
+                            {/* Apenas Excluir Cliente no mobile */}
                             <DropdownMenuItem
                               onClick={() => handleDeleteClient(client)}
                               className="text-red-600"
@@ -1620,64 +1604,64 @@ export function ClientTable() {
 
       {/* Add Client Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) resetForm(); }}>
-        <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
-          <DialogHeader className="space-y-3">
-            <div className="flex items-center space-x-3">
-              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                <PlusCircle className="h-5 w-5 text-white" />
+        <DialogContent className="w-[calc(100vw-2rem)] sm:w-[90vw] sm:max-w-[700px] max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="space-y-2 sm:space-y-3">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                <PlusCircle className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
               </div>
-              <div>
-                <DialogTitle className="text-xl font-semibold">Adicionar Novo Cliente</DialogTitle>
-                <DialogDescription className="text-sm text-muted-foreground">
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-base sm:text-xl font-semibold">Adicionar Novo Cliente</DialogTitle>
+                <DialogDescription className="text-xs sm:text-sm text-muted-foreground">
                   Preencha as informações do novo cliente
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="space-y-6 py-4">
+          <div className="space-y-4 sm:space-y-6 py-2 sm:py-4">
             {/* Basic Info Section - Add Modal */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Informações Básicas</h3>
-              <div className="grid gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name" className="text-sm font-medium text-foreground">Nome do Cliente</Label>
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">Informações Básicas</h3>
+              <div className="grid gap-3 sm:gap-4">
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label htmlFor="name" className="text-xs sm:text-sm font-medium text-foreground">Nome do Cliente</Label>
                   <Input
                     id="name"
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
                     placeholder="Digite o nome completo"
                     autoComplete="off"
-                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
+                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm"
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="phone" className="text-sm font-medium text-foreground">WhatsApp</Label>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label htmlFor="phone" className="text-xs sm:text-sm font-medium text-foreground">WhatsApp</Label>
                   <Input
                     id="phone"
-                    placeholder="11987654321 ou +5511987654321"
+                    placeholder="11987654321"
                     value={clientPhone}
                     onChange={(e) => handlePhoneChange(e.target.value)}
                     autoComplete="off"
-                    className={`border-2 focus:border-primary/60 bg-background shadow-sm transition-colors ${phoneError ? 'border-red-500 focus:border-red-500' : 'border-border/60'
+                    className={`border-2 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm ${phoneError ? 'border-red-500 focus:border-red-500' : 'border-border/60'
                       }`}
                   />
                   {phoneError && (
-                    <p className="text-sm text-red-600 mt-1">{phoneError}</p>
+                    <p className="text-xs sm:text-sm text-red-600 mt-1">{phoneError}</p>
                   )}
                 </div>
               </div>
             </div>
 
             {/* Panel and Plan Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Configuração do Serviço</h3>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-foreground">Painel</Label>
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">Configuração do Serviço</h3>
+              <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label className="text-xs sm:text-sm font-medium text-foreground">Painel</Label>
                   <Select value={selectedPanelId} onValueChange={setSelectedPanelId}>
-                    <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
+                    <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm h-10">
                       <SelectValue placeholder="Selecione um painel" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1688,10 +1672,10 @@ export function ClientTable() {
                   </Select>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-foreground">Plano</Label>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label className="text-xs sm:text-sm font-medium text-foreground">Plano</Label>
                   <Select value={selectedPlanId} onValueChange={setSelectedPlanId}>
-                    <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
+                    <SelectTrigger className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm h-10">
                       <SelectValue placeholder="Selecione um plano" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1705,23 +1689,23 @@ export function ClientTable() {
             </div>
 
             {/* Credentials Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Credenciais de Acesso</h3>
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="username" className="text-sm font-medium text-foreground">Usuário</Label>
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">Credenciais de Acesso</h3>
+              <div className="grid gap-3 sm:gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label htmlFor="username" className="text-xs sm:text-sm font-medium text-foreground">Usuário</Label>
                   <Input
                     id="username"
                     value={clientUsername}
                     onChange={(e) => setClientUsername(e.target.value)}
                     placeholder="Nome de usuário"
                     autoComplete="off"
-                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
+                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm h-10"
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-sm font-medium text-foreground">Senha</Label>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label htmlFor="password" className="text-xs sm:text-sm font-medium text-foreground">Senha</Label>
                   <div className="relative">
                     <Input
                       id="password"
@@ -1730,32 +1714,32 @@ export function ClientTable() {
                       onChange={(e) => handlePasswordChange(e.target.value)}
                       placeholder="Senha de acesso"
                       autoComplete="new-password"
-                      className={`border-2 focus:border-primary/60 bg-background shadow-sm transition-colors pr-10 ${passwordError ? 'border-red-500 focus:border-red-500' : 'border-border/60'
+                      className={`border-2 focus:border-primary/60 bg-background shadow-sm transition-colors pr-10 text-sm h-10 ${passwordError ? 'border-red-500 focus:border-red-500' : 'border-border/60'
                         }`}
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      className="absolute right-0 top-0 h-full px-2 sm:px-3 py-2 hover:bg-transparent"
                       onClick={() => setShowPassword(!showPassword)}
                     >
                       {showPassword ? (
-                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                        <EyeOff className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                       ) : (
-                        <Eye className="h-4 w-4 text-muted-foreground" />
+                        <Eye className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
                       )}
                     </Button>
                   </div>
                   {passwordError && (
-                    <p className="text-sm text-red-600 mt-1">{passwordError}</p>
+                    <p className="text-xs sm:text-sm text-red-600 mt-1">{passwordError}</p>
                   )}
                   {(() => {
                     const panelForAddPasswordCheck = panels?.find(p => p.id === selectedPanelId);
                     if (panelForAddPasswordCheck?.sigma_connected && clientPassword.length > 0) {
                       const strengthInfo = getPasswordStrengthMessage(clientPassword);
                       return (
-                        <p className={`text-sm mt-1 ${strengthInfo.color}`}>
+                        <p className={`text-xs sm:text-sm mt-1 ${strengthInfo.color}`}>
                           {strengthInfo.message}
                         </p>
                       );
@@ -1766,15 +1750,112 @@ export function ClientTable() {
               </div>
             </div>
 
+            {/* Apps Section - Moved here after credentials */}
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Aplicativos em Uso
+              </h3>
+
+              {apps && apps.length > 0 ? (
+                <div className="space-y-2 sm:space-y-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAppsExpanded(!isAppsExpanded)}
+                    className="w-full justify-between h-auto p-3 sm:p-4 border-2 border-dashed hover:border-solid hover:bg-muted/50 transition-all"
+                  >
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                      <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                        <Smartphone className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
+                      </div>
+                      <div className="text-left min-w-0 flex-1">
+                        <div className="font-medium text-xs sm:text-sm truncate">
+                          {selectedApps.length > 0
+                            ? `Cliente usa ${selectedApps.length} aplicativo${selectedApps.length !== 1 ? 's' : ''}`
+                            : 'Definir aplicativos do cliente'
+                          }
+                        </div>
+                        <div className="text-xs sm:text-sm text-muted-foreground truncate">
+                          {isAppsExpanded
+                            ? 'Clique para ocultar a lista'
+                            : `Selecione quais apps o cliente utiliza`
+                          }
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                      {selectedApps.length > 0 && (
+                        <div className="flex -space-x-1">
+                          {selectedApps.slice(0, 3).map((_, index) => (
+                            <div key={index} className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center">
+                              <div className="w-1.5 h-1.5 sm:w-2 sm:h-2 bg-white rounded-full"></div>
+                            </div>
+                          ))}
+                          {selectedApps.length > 3 && (
+                            <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full bg-muted border-2 border-white flex items-center justify-center">
+                              <span className="text-[10px] sm:text-xs font-medium">+{selectedApps.length - 3}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {isAppsExpanded ? (
+                        <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      )}
+                    </div>
+                  </Button>
+
+                  {isAppsExpanded && (
+                    <div className="grid grid-cols-2 gap-2 p-3 sm:p-4 bg-muted/30 rounded-lg border">
+                      {apps.map((app) => (
+                        <div
+                          key={app.id}
+                          onClick={() => {
+                            if (selectedApps.includes(app.id)) {
+                              setSelectedApps(selectedApps.filter(id => id !== app.id));
+                            } else {
+                              setSelectedApps([...selectedApps, app.id]);
+                            }
+                          }}
+                          className={`flex items-center gap-1.5 sm:gap-2 p-2 sm:p-3 rounded-lg border-2 cursor-pointer transition-all ${selectedApps.includes(app.id)
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
+                            : 'border-border hover:border-blue-300 hover:bg-muted/50'
+                            }`}
+                        >
+                          <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0 ${selectedApps.includes(app.id)
+                            ? 'bg-blue-500 border-blue-500'
+                            : 'border-muted-foreground/30'
+                            }`}>
+                            {selectedApps.includes(app.id) && (
+                              <svg className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-xs sm:text-sm font-medium truncate">{app.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-6 sm:py-8 text-muted-foreground">
+                  <Smartphone className="h-10 w-10 sm:h-12 sm:w-12 mx-auto mb-2 opacity-50" />
+                  <p className="text-xs sm:text-sm">Nenhum aplicativo cadastrado</p>
+                </div>
+              )}
+            </div>
+
             {/* Payment Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Configuração de Pagamento</h3>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-foreground">Data de Vencimento</Label>
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">Configuração de Pagamento</h3>
+              <div className="space-y-3 sm:space-y-4">
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label className="text-xs sm:text-sm font-medium text-foreground">Data de Vencimento</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors">
+                      <Button variant="outline" className="w-full justify-start border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm h-10">
                         {dueDate ? format(dueDate, 'dd/MM/yyyy') : 'Escolha uma data'}
                       </Button>
                     </PopoverTrigger>
@@ -1784,31 +1865,31 @@ export function ClientTable() {
                   </Popover>
                 </div>
 
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium text-foreground">Valor de Desconto</Label>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Label className="text-xs sm:text-sm font-medium text-foreground">Valor de Desconto</Label>
                   <Input
                     type="number"
                     value={discount_value}
                     onChange={(e) => handleDiscountChange(e.target.value)}
                     placeholder="0.00"
-                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
+                    className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm h-10"
                   />
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   <div className="flex items-center space-x-2">
                     <Switch checked={use_fixed_value} onCheckedChange={setUseFixedValue} />
-                    <Label className="text-sm font-medium text-foreground">Usar valor fixo</Label>
+                    <Label className="text-xs sm:text-sm font-medium text-foreground">Usar valor fixo</Label>
                   </div>
                   {use_fixed_value && (
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium text-foreground">Valor Fixo</Label>
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <Label className="text-xs sm:text-sm font-medium text-foreground">Valor Fixo</Label>
                       <Input
                         type="number"
                         value={fixed_value}
                         onChange={(e) => handleFixedValueChange(e.target.value)}
                         placeholder="Valor personalizado"
-                        className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors"
+                        className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors text-sm h-10"
                       />
                     </div>
                   )}
@@ -1817,194 +1898,34 @@ export function ClientTable() {
             </div>
 
             {/* Notes Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Observações</h3>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-foreground">Observações Adicionais</Label>
+            <div className="space-y-3 sm:space-y-4">
+              <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide">Observações</h3>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm font-medium text-foreground">Observações Adicionais</Label>
                 <Textarea
                   value={clientNotes}
                   onChange={(e) => setClientNotes(e.target.value)}
                   placeholder="Informações adicionais sobre o cliente..."
-                  className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors min-h-[80px] resize-none"
+                  className="border-2 border-border/60 focus:border-primary/60 bg-background shadow-sm transition-colors min-h-[60px] sm:min-h-[80px] resize-none text-sm"
                 />
               </div>
             </div>
 
-            {/* Applications Section */}
-            <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                Aplicativos em Uso
-              </h3>
-
-              {apps && apps.length > 0 ? (
-                <div className="space-y-3">
-                  {/* Botão para expandir/colapsar */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsAppsExpanded(!isAppsExpanded)}
-                    className="w-full justify-between h-auto p-4 border-2 border-dashed hover:border-solid hover:bg-muted/50 transition-all"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-                        <Smartphone className="h-5 w-5 text-white" />
-                      </div>
-                      <div className="text-left">
-                        <div className="font-medium">
-                          {selectedApps.length > 0
-                            ? `Cliente usa ${selectedApps.length} aplicativo${selectedApps.length !== 1 ? 's' : ''}`
-                            : 'Definir aplicativos do cliente'
-                          }
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {isAppsExpanded
-                            ? 'Clique para ocultar a lista'
-                            : `Selecione quais apps o cliente utiliza`
-                          }
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {selectedApps.length > 0 && (
-                        <div className="flex -space-x-1">
-                          {selectedApps.slice(0, 3).map((_, index) => (
-                            <div key={index} className="w-6 h-6 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center">
-                              <div className="w-2 h-2 bg-white rounded-full"></div>
-                            </div>
-                          ))}
-                          {selectedApps.length > 3 && (
-                            <div className="w-6 h-6 rounded-full bg-muted border-2 border-white flex items-center justify-center">
-                              <span className="text-xs font-medium">+{selectedApps.length - 3}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {isAppsExpanded ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronRight className="h-4 w-4" />
-                      )}
-                    </div>
-                  </Button>
-
-                  {/* Lista expandida */}
-                  {isAppsExpanded && (
-                    <div className="space-y-4">
-                      {/* Header com ações rápidas */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            checked={selectedApps.length === apps.length}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setSelectedApps(apps.map(app => app.id));
-                              } else {
-                                setSelectedApps([]);
-                              }
-                            }}
-                          />
-                          <span className="text-sm font-medium">
-                            {selectedApps.length === apps.length ? 'Desmarcar todos' : 'Selecionar todos'}
-                          </span>
-                        </div>
-                        {selectedApps.length > 0 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedApps([])}
-                            className="text-xs h-7"
-                          >
-                            Limpar seleção
-                          </Button>
-                        )}
-                      </div>
-
-                      {/* Grid de aplicativos */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {apps.map((app) => (
-                          <div
-                            key={app.id}
-                            className={`relative p-4 border-2 rounded-lg transition-all cursor-pointer hover:shadow-md ${selectedApps.includes(app.id)
-                              ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/20'
-                              : 'border-border hover:border-blue-300'
-                              }`}
-                            onClick={() => {
-                              if (selectedApps.includes(app.id)) {
-                                setSelectedApps(selectedApps.filter(id => id !== app.id));
-                              } else {
-                                setSelectedApps([...selectedApps, app.id]);
-                              }
-                            }}
-                          >
-                            <div className="flex items-start gap-3">
-                              <Checkbox
-                                id={`app-${app.id}`}
-                                checked={selectedApps.includes(app.id)}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedApps([...selectedApps, app.id]);
-                                  } else {
-                                    setSelectedApps(selectedApps.filter(id => id !== app.id));
-                                  }
-                                }}
-                              />
-                              <div className="flex-1 min-w-0">
-                                <div className="font-medium text-sm">{app.name}</div>
-                                {app.description && (
-                                  <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-                                    {app.description}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Indicador de seleção */}
-                            {selectedApps.includes(app.id) && (
-                              <div className="absolute top-2 right-2 w-3 h-3 bg-blue-500 rounded-full flex items-center justify-center">
-                                <div className="w-1.5 h-1.5 bg-white rounded-full"></div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Footer com resumo */}
-                      {selectedApps.length > 0 && (
-                        <div className="p-3 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                            <span className="text-sm text-blue-700 dark:text-blue-300">
-                              Cliente utiliza {selectedApps.length} aplicativo{selectedApps.length !== 1 ? 's' : ''} para assistir IPTV
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Smartphone className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p className="text-sm">Nenhum aplicativo cadastrado</p>
-                  <p className="text-xs mt-1">Cadastre aplicativos na seção "Aplicativos" para selecioná-los aqui</p>
-                </div>
-              )}
-            </div>
           </div>
 
-          <DialogFooter className="flex flex-col sm:flex-row gap-3">
+          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 pt-4">
             <Button
               variant="outline"
               onClick={() => setIsDialogOpen(false)}
-              className="w-full sm:w-auto"
+              className="w-full sm:w-auto text-sm h-10"
             >
               Cancelar
             </Button>
             <Button
               onClick={handleSaveClient}
-              className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
+              className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-sm h-10"
             >
-              <PlusCircle className="mr-2 h-4 w-4" />
+              <PlusCircle className="mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
               Adicionar Cliente
             </Button>
           </DialogFooter>
@@ -2157,6 +2078,103 @@ export function ClientTable() {
                   })()}
                 </div>
               </div>
+            </div>
+
+            {/* Apps Section - Added to edit modal */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Aplicativos em Uso
+              </h3>
+
+              {apps && apps.length > 0 ? (
+                <div className="space-y-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAppsExpanded(!isAppsExpanded)}
+                    className="w-full justify-between h-auto p-4 border-2 border-dashed hover:border-solid hover:bg-muted/50 transition-all"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                        <Smartphone className="h-5 w-5 text-white" />
+                      </div>
+                      <div className="text-left">
+                        <div className="font-medium">
+                          {selectedApps.length > 0
+                            ? `Cliente usa ${selectedApps.length} aplicativo${selectedApps.length !== 1 ? 's' : ''}`
+                            : 'Definir aplicativos do cliente'
+                          }
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {isAppsExpanded
+                            ? 'Clique para ocultar a lista'
+                            : `Selecione quais apps o cliente utiliza`
+                          }
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {selectedApps.length > 0 && (
+                        <div className="flex -space-x-1">
+                          {selectedApps.slice(0, 3).map((_, index) => (
+                            <div key={index} className="w-6 h-6 rounded-full bg-blue-500 border-2 border-white flex items-center justify-center">
+                              <div className="w-2 h-2 bg-white rounded-full"></div>
+                            </div>
+                          ))}
+                          {selectedApps.length > 3 && (
+                            <div className="w-6 h-6 rounded-full bg-muted border-2 border-white flex items-center justify-center">
+                              <span className="text-xs font-medium">+{selectedApps.length - 3}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {isAppsExpanded ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4" />
+                      )}
+                    </div>
+                  </Button>
+
+                  {isAppsExpanded && (
+                    <div className="grid grid-cols-2 gap-2 p-4 bg-muted/30 rounded-lg border">
+                      {apps.map((app) => (
+                        <div
+                          key={app.id}
+                          onClick={() => {
+                            if (selectedApps.includes(app.id)) {
+                              setSelectedApps(selectedApps.filter(id => id !== app.id));
+                            } else {
+                              setSelectedApps([...selectedApps, app.id]);
+                            }
+                          }}
+                          className={`flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all ${selectedApps.includes(app.id)
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
+                            : 'border-border hover:border-blue-300 hover:bg-muted/50'
+                            }`}
+                        >
+                          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${selectedApps.includes(app.id)
+                            ? 'bg-blue-500 border-blue-500'
+                            : 'border-muted-foreground/30'
+                            }`}>
+                            {selectedApps.includes(app.id) && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <span className="text-sm font-medium">{app.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Smartphone className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">Nenhum aplicativo cadastrado</p>
+                </div>
+              )}
             </div>
 
             {/* Payment Section */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 export interface WhatsAppStatus {
   connected: boolean;
@@ -29,8 +29,30 @@ export interface WhatsAppClient {
 // Documentação: https://doc.evolution-api.com/
 class WhatsAppAPI {
   private baseUrl = process.env.NEXT_PUBLIC_WHATSAPP_API_URL || 'http://localhost:3002';
-  private apiKey = process.env.NEXT_PUBLIC_WHATSAPP_API_KEY || 'gestplay-api-key-2024';
-  private instanceName = 'gestplay-instance';
+  private apiKey = process.env.NEXT_PUBLIC_WHATSAPP_API_KEY || 'UltraGestor-api-key-2024';
+  public instanceName: string;
+
+  constructor(resellerId: string) {
+    // Criar instância única por revenda
+    // Extrair apenas o ID numérico se vier com timestamp/hash
+    let cleanId = resellerId;
+    
+    // Se já começa com "reseller_", extrair o ID
+    if (resellerId.startsWith('reseller_')) {
+      cleanId = resellerId.replace('reseller_', '');
+    }
+    
+    // Extrair apenas números do início (antes de qualquer underscore ou caractere não numérico)
+    const numericMatch = cleanId.match(/^(\d+)/);
+    if (numericMatch) {
+      cleanId = numericMatch[1];
+    }
+    
+    // Criar nome da instância com ID limpo
+    this.instanceName = `reseller_${cleanId}`;
+    
+    console.log(`🔧 [WhatsAppAPI] Criando API para resellerId: ${resellerId} → instanceName: ${this.instanceName}`);
+  }
 
   async getStatus(): Promise<WhatsAppStatus> {
     try {
@@ -42,32 +64,22 @@ class WhatsAppAPI {
         },
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to get status');
+      // Tentar parsear a resposta mesmo se não for ok
+      const data = await response.json();
+      
+      // Se houver erro na resposta, mas não é crítico
+      if (!response.ok && response.status !== 404) {
+        console.warn(`⚠️ [WhatsAppAPI] Status ${response.status} ao verificar ${this.instanceName}`);
       }
       
-      const data = await response.json();
-      const state = data.instance?.state;
+      const state = data.instance?.state || data.state;
+      
+      console.log(`📊 [WhatsAppAPI] Status da instância ${this.instanceName}:`, state);
       
       // Buscar informações detalhadas se conectado
       let phoneNumber = undefined;
       if (state === 'open') {
-        try {
-          const instanceResponse = await fetch(`${this.baseUrl}/instance/${this.instanceName}`, {
-            method: 'GET',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': this.apiKey,
-            },
-          });
-          
-          if (instanceResponse.ok) {
-            const instanceData = await instanceResponse.json();
-            phoneNumber = instanceData.instance?.profileName || 'WhatsApp Conectado';
-          }
-        } catch (err) {
-          console.log('Erro ao buscar detalhes da instância:', err);
-        }
+        phoneNumber = data.instance?.profileName || 'WhatsApp Conectado';
       }
       
       return {
@@ -78,6 +90,8 @@ class WhatsAppAPI {
         clientsCount: 0,
       };
     } catch (error) {
+      console.error(`❌ [WhatsAppAPI] Erro ao verificar status:`, error);
+      // Retornar desconectado em caso de erro, mas não quebrar a aplicação
       return {
         connected: false,
         sessionId: this.instanceName,
@@ -87,6 +101,8 @@ class WhatsAppAPI {
 
   async startSession(): Promise<{ success: boolean; qrCode?: string; error?: string }> {
     try {
+      console.log(`🔄 Criando/conectando instância: ${this.instanceName}`);
+      
       // Primeiro, criar a instância
       const createResponse = await fetch(`${this.baseUrl}/instance/create`, {
         method: 'POST',
@@ -104,7 +120,15 @@ class WhatsAppAPI {
 
       if (!createResponse.ok) {
         const errorData = await createResponse.json();
-        throw new Error(errorData.message || 'Failed to create instance');
+        
+        // Se a instância já existe (409), não é erro - continuar para obter QR Code
+        if (createResponse.status === 409) {
+          console.log(`ℹ️ Instância ${this.instanceName} já existe, obtendo QR Code...`);
+        } else {
+          throw new Error(errorData.message || 'Failed to create instance');
+        }
+      } else {
+        console.log(`✅ Instância ${this.instanceName} criada com sucesso`);
       }
 
       // Aguardar um pouco para a instância inicializar
@@ -226,17 +250,49 @@ class WhatsAppAPI {
   }
 }
 
-export function useWhatsApp() {
+export function useWhatsApp(resellerId?: string) {
   const [status, setStatus] = useState<WhatsAppStatus>({ connected: false });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clients, setClients] = useState<WhatsAppClient[]>([]);
 
-  const api = new WhatsAppAPI();
+  // Extrair ID limpo do resellerId
+  const instanceId = useMemo(() => {
+    if (!resellerId) return 'default';
+    
+    // Se já começa com "reseller_", extrair o ID
+    let cleanId = resellerId.startsWith('reseller_') 
+      ? resellerId.replace('reseller_', '') 
+      : resellerId;
+    
+    // Extrair apenas números do início (antes de qualquer underscore ou caractere não numérico)
+    const numericMatch = cleanId.match(/^(\d+)/);
+    if (numericMatch) {
+      cleanId = numericMatch[1];
+    }
+    
+    console.log(`🔧 [useWhatsApp] Extraindo ID: ${resellerId} → ${cleanId}`);
+    return cleanId;
+  }, [resellerId]);
+  
+  console.log(`🔧 [useWhatsApp] Inicializando com resellerId: ${resellerId} → instanceId: ${instanceId}`);
+  
+  // Usar useMemo para recriar a API quando o resellerId mudar
+  const api = useMemo(() => {
+    console.log(`🔄 [useWhatsApp] Criando nova API para instanceId: ${instanceId}`);
+    return new WhatsAppAPI(instanceId);
+  }, [instanceId]);
 
   const checkStatus = useCallback(async () => {
+    if (!api) {
+      console.log(`⚠️ [useWhatsApp] API não inicializada ainda`);
+      return;
+    }
+    
     try {
+      console.log(`🔍 [useWhatsApp] Verificando status da instância: ${api.instanceName}`);
       const currentStatus = await api.getStatus();
+      console.log(`📊 [useWhatsApp] Status recebido:`, currentStatus);
       setStatus(currentStatus);
       
       if (currentStatus.connected) {
@@ -244,11 +300,14 @@ export function useWhatsApp() {
         setClients(whatsappClients);
       }
     } catch (err) {
+      console.error(`❌ [useWhatsApp] Erro ao verificar status:`, err);
       setError(err instanceof Error ? err.message : 'Unknown error');
     }
-  }, []);
+  }, [api]);
 
   const connect = useCallback(async () => {
+    console.log(`🔌 [useWhatsApp] Tentando conectar instância: ${api.instanceName}`);
+    
     setIsLoading(true);
     setError(null);
     
@@ -264,21 +323,36 @@ export function useWhatsApp() {
           }));
           
           // Iniciar polling para verificar status da conexão
+          let connectionDetected = false;
           const pollInterval = setInterval(async () => {
             try {
               const currentStatus = await api.getStatus();
-              if (currentStatus.connected) {
-                setStatus(currentStatus);
-                clearInterval(pollInterval);
-                console.log('✅ WhatsApp conectado com sucesso!');
+              console.log(`🔍 [Polling] Status atual:`, currentStatus.connected ? 'conectado' : 'desconectado');
+              
+              if (currentStatus.connected && !connectionDetected) {
+                connectionDetected = true;
+                console.log('🎉 WhatsApp conectado! Aguardando estabilização...');
+                
+                // Aguardar 3 segundos para estabilizar
+                setTimeout(async () => {
+                  const finalStatus = await api.getStatus();
+                  if (finalStatus.connected) {
+                    setStatus(finalStatus);
+                    clearInterval(pollInterval);
+                    console.log('✅ WhatsApp conectado e estável! Pronto para enviar mensagens.');
+                  }
+                }, 3000);
               }
             } catch (err) {
-              console.log('Erro no polling:', err);
+              console.log('❌ Erro no polling:', err);
             }
           }, 2000); // Verificar a cada 2 segundos
           
           // Limpar polling após 5 minutos
           setTimeout(() => {
+            if (!connectionDetected) {
+              console.log('⏱️ Timeout: QR Code expirou. Gere um novo QR Code.');
+            }
             clearInterval(pollInterval);
           }, 300000);
         }
@@ -290,7 +364,7 @@ export function useWhatsApp() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [api]);
 
   const disconnect = useCallback(async () => {
     setIsLoading(true);
@@ -305,7 +379,7 @@ export function useWhatsApp() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [api]);
 
   const sendMessage = useCallback(async (message: WhatsAppMessage) => {
     if (!status.connected) {
@@ -323,10 +397,10 @@ export function useWhatsApp() {
     } catch (err) {
       throw err;
     }
-  }, [status.connected]);
+  }, [status.connected, api]);
 
   const sendBillingMessage = useCallback(async (clientPhone: string, clientName: string, amount: number, dueDate: string) => {
-    const message = `🔔 *Cobrança GestPlay*
+    const message = `🔔 *Cobrança UltraGestor*
 
 Olá *${clientName}*!
 
@@ -336,7 +410,7 @@ Sua mensalidade está disponível:
 
 Para renovar seu acesso, entre em contato conosco.
 
-_Mensagem automática do sistema GestPlay_`;
+_Mensagem automática do sistema UltraGestor_`;
 
     return await sendMessage({
       to: clientPhone,
@@ -354,7 +428,7 @@ Seu acesso vence em *${daysUntilDue} dias*.
 
 Para evitar interrupções, renove seu plano em breve.
 
-_Mensagem automática do sistema GestPlay_`;
+_Mensagem automática do sistema UltraGestor_`;
 
     return await sendMessage({
       to: clientPhone,
@@ -372,7 +446,7 @@ Seu acesso está em atraso e será suspenso em breve.
 
 Entre em contato para regularizar sua situação.
 
-_Mensagem automática do sistema GestPlay_`;
+_Mensagem automática do sistema UltraGestor_`;
 
     return await sendMessage({
       to: clientPhone,
@@ -381,6 +455,12 @@ _Mensagem automática do sistema GestPlay_`;
     });
   }, [sendMessage]);
 
+  // Verificar status inicial quando a API mudar
+  useEffect(() => {
+    console.log(`🔍 [useWhatsApp] Verificando status inicial para instanceId: ${instanceId}`);
+    checkStatus();
+  }, [instanceId]); // Removido checkStatus da dependência para evitar loop
+
   // Verificar status periodicamente quando conectado
   useEffect(() => {
     if (status.connected) {
@@ -388,11 +468,6 @@ _Mensagem automática do sistema GestPlay_`;
       return () => clearInterval(interval);
     }
   }, [status.connected, checkStatus]);
-
-  // Verificar status inicial
-  useEffect(() => {
-    checkStatus();
-  }, [checkStatus]);
 
   // Função utilitária para formatar números de telefone
   const formatPhoneNumber = useCallback((phone: string) => {

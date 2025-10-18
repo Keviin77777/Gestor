@@ -36,10 +36,6 @@ interface WhatsAppSettings {
   autoSendBilling: boolean;
   autoSendReminders: boolean;
   reminderDaysBefore: number;
-  apiUrl: string;
-  apiKey: string;
-  instanceName: string;
-  webhookUrl: string;
   rateLimitPerMinute: number;
   defaultCountryCode: string;
   businessHours: {
@@ -54,10 +50,6 @@ export default function WhatsAppSettingsPage() {
     autoSendBilling: true,
     autoSendReminders: true,
     reminderDaysBefore: 3,
-    apiUrl: process.env.NEXT_PUBLIC_WHATSAPP_API_URL || 'http://localhost:8080',
-    apiKey: 'gestplay-api-key-2024',
-    instanceName: 'gestplay-instance',
-    webhookUrl: '',
     rateLimitPerMinute: 10,
     defaultCountryCode: '55',
     businessHours: {
@@ -103,10 +95,6 @@ export default function WhatsAppSettingsPage() {
       autoSendBilling: true,
       autoSendReminders: true,
       reminderDaysBefore: 3,
-      apiUrl: 'http://localhost:8080',
-      apiKey: 'gestplay-api-key-2024',
-      instanceName: 'gestplay-instance',
-      webhookUrl: '',
       rateLimitPerMinute: 10,
       defaultCountryCode: '55',
       businessHours: {
@@ -118,38 +106,7 @@ export default function WhatsAppSettingsPage() {
     setSettings(defaultSettings);
   };
 
-  const testConnection = async () => {
-    try {
-      const response = await fetch(`${settings.apiUrl}/instance/connectionState/${settings.instanceName}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': settings.apiKey,
-        },
-      });
 
-      if (response.ok) {
-        setSaveResult({
-          success: true,
-          message: 'Conexão testada com sucesso!',
-        });
-      } else {
-        setSaveResult({
-          success: false,
-          message: 'Falha na conexão com a API',
-        });
-      }
-    } catch (error) {
-      setSaveResult({
-        success: false,
-        message: 'Erro ao testar conexão',
-      });
-    }
-
-    setTimeout(() => {
-      setSaveResult(null);
-    }, 3000);
-  };
 
   return (
     <div className="space-y-6">
@@ -255,77 +212,7 @@ export default function WhatsAppSettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Configurações da API */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5 text-green-600" />
-              API Configuration
-            </CardTitle>
-            <CardDescription>
-              Configure a conexão com a API do WhatsApp
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="apiUrl">URL da API</Label>
-              <Input
-                id="apiUrl"
-                value={settings.apiUrl}
-                onChange={(e) =>
-                  setSettings(prev => ({ ...prev, apiUrl: e.target.value }))
-                }
-                placeholder="http://localhost:8080"
-              />
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="apiKey">API Key</Label>
-              <Input
-                id="apiKey"
-                type="password"
-                value={settings.apiKey}
-                onChange={(e) =>
-                  setSettings(prev => ({ ...prev, apiKey: e.target.value }))
-                }
-                placeholder="sua-api-key"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="instanceName">Nome da Instância</Label>
-              <Input
-                id="instanceName"
-                value={settings.instanceName}
-                onChange={(e) =>
-                  setSettings(prev => ({ ...prev, instanceName: e.target.value }))
-                }
-                placeholder="gestplay-instance"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="webhookUrl">Webhook URL (Opcional)</Label>
-              <Input
-                id="webhookUrl"
-                value={settings.webhookUrl}
-                onChange={(e) =>
-                  setSettings(prev => ({ ...prev, webhookUrl: e.target.value }))
-                }
-                placeholder="https://seu-dominio.com/api/webhook/whatsapp"
-              />
-            </div>
-
-            <Button
-              variant="outline"
-              onClick={testConnection}
-              className="w-full gap-2"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Testar Conexão
-            </Button>
-          </CardContent>
-        </Card>
 
         {/* Configurações Regionais */}
         <Card>
