@@ -183,7 +183,7 @@ function handleRegister(): void {
              VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))",
             [
                 $session_id,
-                $user['id'],
+                $user_id,
                 $token,
                 $_SERVER['REMOTE_ADDR'] ?? null,
                 $_SERVER['HTTP_USER_AGENT'] ?? null
