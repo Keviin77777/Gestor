@@ -152,10 +152,26 @@ Password: [gere uma senha forte]
 
 ### 4.2 Importar Schema
 
-Via **phpMyAdmin** ou SSH:
+**Opção 1: Script Automático (Recomendado)**
 
 ```bash
 cd /www/wwwroot/seudominio.com
+
+# Dar permissão
+chmod +x install-database.sh
+
+# Executar (vai solicitar credenciais)
+bash install-database.sh
+```
+
+**Opção 2: Comandos Manuais via SSH**
+
+```bash
+cd /www/wwwroot/seudominio.com
+
+# Verificar se está no diretório correto
+pwd
+ls database/
 
 # Importar schema principal
 mysql -u gestplay_user -p gestplay_db < database/INSTALAR_WORKBENCH.sql
@@ -171,14 +187,31 @@ mysql -u gestplay_user -p gestplay_db < database/migrations/007_admin_and_resell
 mysql -u gestplay_user -p gestplay_db < database/migrations/008_default_client_templates.sql
 mysql -u gestplay_user -p gestplay_db < database/migrations/009_admin_payment_methods.sql
 mysql -u gestplay_user -p gestplay_db < database/migrations/010_trial_system.sql
+mysql -u gestplay_user -p gestplay_db < database/migrations/011_add_whatsapp_to_resellers.sql
 mysql -u gestplay_user -p gestplay_db < database/migrations/012_password_reset_tokens.sql
 ```
 
-Ou via phpMyAdmin:
-1. Acesse phpMyAdmin
+**Opção 3: Via phpMyAdmin**
+
+1. Acesse phpMyAdmin no aaPanel
 2. Selecione o banco `gestplay_db`
 3. Vá em **Import**
-4. Faça upload de cada arquivo SQL em ordem
+4. Faça upload do `database/INSTALAR_WORKBENCH.sql`
+5. Repita para cada migration em ordem numérica
+
+**⚠️ Troubleshooting:**
+
+Se der erro "No such file or directory":
+```bash
+# Confirmar que está no diretório correto
+cd /www/wwwroot/seudominio.com
+pwd
+
+# Usar caminho absoluto
+mysql -u gestplay_user -p gestplay_db < /www/wwwroot/seudominio.com/database/INSTALAR_WORKBENCH.sql
+```
+
+📖 **Guia completo:** Veja `COMANDOS_INSTALACAO_DB.md` para mais opções
 
 ---
 
