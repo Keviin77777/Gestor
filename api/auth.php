@@ -330,9 +330,11 @@ function handleLogin(): void {
         'user' => [
             'id' => $user['id'],
             'email' => $user['email'],
+            'name' => $user['name'] ?? $user['display_name'],
             'display_name' => $user['display_name'],
-            'email_verified' => (bool)$user['email_verified'],
-            'photo_url' => $user['photo_url']
+            'role' => $user['role'],
+            'email_verified' => (bool)($user['email_verified'] ?? false),
+            'photo_url' => $user['photo_url'] ?? null
         ]
     ], 'Login successful');
 }
