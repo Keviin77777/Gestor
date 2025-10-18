@@ -3,6 +3,9 @@
 -- Versão: 2.0
 -- ============================================================================
 
+-- Configurar charset para suportar emojis
+ALTER DATABASE ultragestor_db CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 -- Desabilitar verificação de foreign keys temporariamente
 SET FOREIGN_KEY_CHECKS = 0;
 
