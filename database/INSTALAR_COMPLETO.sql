@@ -280,12 +280,12 @@ VALUES (
   '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
   'admin',
   TRUE
-) ON DUPLICATE KEY UPDATE id=id;
+) ON DUPLICATE KEY UPDATE users.id=users.id;
 
 -- Copiar para tabela resellers
 INSERT INTO resellers (id, name, email, password, role, is_active)
 SELECT id, name, email, password, role, is_active FROM users
-ON DUPLICATE KEY UPDATE id=id;
+ON DUPLICATE KEY UPDATE resellers.id=resellers.id;
 
 -- Inserir planos de assinatura padrão
 INSERT INTO subscription_plans (id, name, description, price, duration_days, max_clients, trial_days, is_active)
@@ -293,7 +293,7 @@ VALUES
   ('plan-basic', 'Básico', 'Plano básico para iniciantes', 29.90, 30, 50, 7, TRUE),
   ('plan-pro', 'Profissional', 'Plano profissional com mais recursos', 59.90, 30, 200, 7, TRUE),
   ('plan-premium', 'Premium', 'Plano premium ilimitado', 99.90, 30, NULL, 7, TRUE)
-ON DUPLICATE KEY UPDATE id=id;
+ON DUPLICATE KEY UPDATE subscription_plans.id=subscription_plans.id;
 
 -- Inserir templates WhatsApp padrão para admin
 INSERT INTO whatsapp_reminder_templates (id, reseller_id, event_type, message, is_active)
@@ -306,7 +306,7 @@ VALUES
   (UUID(), 'admin-001', '2_days_after', 'Olá {{cliente_nome}}! ❌\n\nSeu plano está VENCIDO desde {{data_vencimento}}.\n\n💵 Valor: R$ {{valor}}\n🔗 Regularizar: {{link_pagamento}}\n\nRenove para reativar seu acesso!', TRUE),
   (UUID(), 'admin-001', '5_days_after', 'Olá {{cliente_nome}}! ⛔\n\nÚLTIMO AVISO: Seu plano está vencido há 5 dias!\n\n💵 Valor: R$ {{valor}}\n🔗 Renovar: {{link_pagamento}}\n\nRenove hoje ou perderá o acesso definitivamente!', TRUE),
   (UUID(), 'admin-001', 'payment_confirmed', 'Olá {{cliente_nome}}! ✅\n\nPagamento CONFIRMADO!\n\n💰 Valor: R$ {{valor}}\n📅 Novo vencimento: {{data_vencimento}}\n\nSeu acesso foi renovado automaticamente!\n\nObrigado pela preferência! 🎉', TRUE)
-ON DUPLICATE KEY UPDATE id=id;
+ON DUPLICATE KEY UPDATE whatsapp_reminder_templates.id=whatsapp_reminder_templates.id;
 
 -- ============================================================================
 -- FINALIZAÇÃO
