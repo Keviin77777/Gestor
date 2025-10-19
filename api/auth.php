@@ -129,6 +129,29 @@ function handleRegister(): void {
         // Exemplo: Criado em 10/10 às 20h -> Expira em 13/10 às 23:59:59
         $trialExpiryDate = date('Y-m-d 23:59:59', strtotime('+3 days'));
         
+        // Inserir em USERS (para foreign keys funcionarem)
+        executeQuery(
+            "INSERT INTO users (
+                id, name, email, password, whatsapp, is_active, is_admin,
+                subscription_plan_id, subscription_expiry_date, account_status, trial_used
+            ) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                $user_id,
+                $display_name,          // name
+                $email, 
+                $password_hash,         // password
+                $whatsapp,              // WhatsApp
+                1,                      // is_active
+                0,                      // is_admin = FALSE
+                'plan_trial',           // Plano Trial
+                $trialExpiryDate,       // Expira em 3 dias
+                'trial',                // Status: trial
+                1                       // Trial já usado
+            ]
+        );
+        
+        // Inserir em RESELLERS (compatibilidade)
         executeQuery(
             "INSERT INTO resellers (
                 id, name, email, password, display_name, whatsapp, is_active, is_admin,
@@ -139,11 +162,11 @@ function handleRegister(): void {
                 $user_id,
                 $display_name,          // name
                 $email, 
-                $password_hash,         // password (não password_hash!)
+                $password_hash,         // password
                 $display_name,          // display_name
                 $whatsapp,              // WhatsApp
                 1,                      // is_active
-                0,                      // is_admin = FALSE (não é admin!)
+                0,                      // is_admin = FALSE
                 'plan_trial',           // Plano Trial
                 $trialExpiryDate,       // Expira em 3 dias
                 'trial',                // Status: trial
