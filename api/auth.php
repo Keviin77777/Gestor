@@ -155,12 +155,13 @@ function handleRegister(): void {
         createDefaultTemplatesForNewUser($user_id);
         
         // Log the registration
-        AuditLogger::log($user_id, 'REGISTER', 'resellers', $user_id, null, [
-            'email' => $email,
-            'display_name' => $display_name,
-            'trial_activated' => true,
-            'trial_expiry' => $trialExpiryDate
-        ]);
+        // TEMPORARIAMENTE DESABILITADO - Audit log com problemas de schema
+        // AuditLogger::log($user_id, 'REGISTER', 'resellers', $user_id, null, [
+        //     'email' => $email,
+        //     'display_name' => $display_name,
+        //     'trial_activated' => true,
+        //     'trial_expiry' => $trialExpiryDate
+        // ]);
         
         error_log("Novo usuário registrado com Trial: $email (expira em $trialExpiryDate)");
         
@@ -312,7 +313,8 @@ function handleLogin(): void {
     );
     
     // Log the login
-    AuditLogger::log($user['id'], 'LOGIN', 'resellers', $user['id'], null, null);
+    // TEMPORARIAMENTE DESABILITADO - Audit log com problemas de schema
+    // AuditLogger::log($user['id'], 'LOGIN', 'resellers', $user['id'], null, null);
     
     // Criar sessão PHP para compatibilidade
     if (session_status() === PHP_SESSION_NONE) {
@@ -362,7 +364,8 @@ function handleLogout(): void {
     }
     
     // Log the logout
-    AuditLogger::log($user['reseller_id'], 'LOGOUT', 'resellers', $user['reseller_id'], null, null);
+    // TEMPORARIAMENTE DESABILITADO - Audit log com problemas de schema
+    // AuditLogger::log($user['reseller_id'], 'LOGOUT', 'resellers', $user['reseller_id'], null, null);
     
     // Limpar sessão PHP
     if (session_status() === PHP_SESSION_NONE) {
