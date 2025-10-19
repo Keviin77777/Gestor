@@ -19,11 +19,22 @@ export function useAuth() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        console.log('[useAuth] Buscando usuário de:', `/api/auth-user`);
+        // Verificar se há token no localStorage
+        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+        
+        if (!token) {
+          console.log('[useAuth] Sem token no localStorage');
+          setLoading(false);
+          return;
+        }
+
+        console.log('[useAuth] Token encontrado, buscando usuário de:', `/api/auth-user`);
+        
         const response = await fetch(`/api/auth-user`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
           },
           credentials: 'include',
         });
@@ -36,6 +47,10 @@ export function useAuth() {
           setUser(data.user);
         } else {
           console.error('[useAuth] Erro na resposta:', response.status, response.statusText);
+          // Se o token for inválido, limpar localStorage
+          if (response.status === 401) {
+            localStorage.removeItem('auth_token');
+          }
         }
       } catch (error) {
         console.error('[useAuth] Erro ao buscar usuário:', error);
