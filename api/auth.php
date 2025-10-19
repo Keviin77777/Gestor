@@ -131,17 +131,17 @@ function handleRegister(): void {
         
         executeQuery(
             "INSERT INTO resellers (
-                id, email, password_hash, display_name, whatsapp, email_verified, is_active, is_admin,
+                id, name, email, password, display_name, whatsapp, is_active, is_admin,
                 subscription_plan_id, subscription_expiry_date, account_status, trial_used
             ) 
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                $user_id, 
+                $user_id,
+                $display_name,          // name
                 $email, 
-                $password_hash, 
-                $display_name,
+                $password_hash,         // password (não password_hash!)
+                $display_name,          // display_name
                 $whatsapp,              // WhatsApp
-                0,                      // email_verified
                 1,                      // is_active
                 0,                      // is_admin = FALSE (não é admin!)
                 'plan_trial',           // Plano Trial
@@ -151,8 +151,18 @@ function handleRegister(): void {
             ]
         );
         
-        // Criar templates padrão para o novo usuário
-        createDefaultTemplatesForNewUser($user_id);
+        // COMMIT AQUI - Salvar usuário no banco ANTES de criar templates
+        commit();
+        
+        error_log("✅ Usuário salvo no banco: $email (ID: $user_id)");
+        
+        // Criar templates padrão para o novo usuário (fora da transação)
+        try {
+            createDefaultTemplatesForNewUser($user_id);
+            error_log("✅ Templates criados para: $user_id");
+        } catch (Exception $e) {
+            error_log("⚠️ Erro ao criar templates (usuário já foi salvo): " . $e->getMessage());
+        }
         
         // Log the registration
         // TEMPORARIAMENTE DESABILITADO - Audit log com problemas de schema
@@ -163,9 +173,7 @@ function handleRegister(): void {
         //     'trial_expiry' => $trialExpiryDate
         // ]);
         
-        error_log("Novo usuário registrado com Trial: $email (expira em $trialExpiryDate)");
-        
-        commit();
+        error_log("✅ Novo usuário registrado com Trial: $email (expira em $trialExpiryDate)");
         
         // Generate JWT token
         $token = JWT::encode([
@@ -216,7 +224,14 @@ function handleRegister(): void {
         ], 'Registration successful');
         
     } catch (Exception $e) {
-        rollback();
+        // Tentar fazer rollback apenas se a transação ainda estiver ativa
+        try {
+            rollback();
+        } catch (Exception $rollbackError) {
+            // Ignorar erro de rollback se não houver transação ativa
+            error_log('Rollback não necessário ou já foi feito');
+        }
+        
         error_log('Registration error: ' . $e->getMessage());
         error_log('Registration error trace: ' . $e->getTraceAsString());
         Response::error('Registration failed: ' . $e->getMessage(), 500);
