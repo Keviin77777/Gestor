@@ -497,13 +497,13 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
                 }
               `}>
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${subscriptionData.subscription.subscription_health === 'expired'
+                  <div className={`p-1.5 rounded-lg ${subscriptionData.subscription.subscription_health === 'expired'
                       ? 'bg-red-200 dark:bg-red-900/50'
                       : subscriptionData.subscription.subscription_health === 'expiring_soon'
                         ? 'bg-yellow-200 dark:bg-yellow-900/50'
                         : 'bg-green-200 dark:bg-green-900/50'
                     }`}>
-                    <Calendar className={`h-5 w-5 ${subscriptionData.subscription.subscription_health === 'expired'
+                    <Calendar className={`h-4 w-4 ${subscriptionData.subscription.subscription_health === 'expired'
                         ? 'text-red-700 dark:text-red-300'
                         : subscriptionData.subscription.subscription_health === 'expiring_soon'
                           ? 'text-yellow-700 dark:text-yellow-300'
@@ -511,7 +511,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
                       }`} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-xs font-semibold uppercase tracking-wide ${subscriptionData.subscription.subscription_health === 'expired'
+                    <p className={`text-[10px] font-semibold uppercase tracking-wide ${subscriptionData.subscription.subscription_health === 'expired'
                         ? 'text-red-700 dark:text-red-300'
                         : subscriptionData.subscription.subscription_health === 'expiring_soon'
                           ? 'text-yellow-700 dark:text-yellow-300'
@@ -524,7 +524,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
                           : 'Assinatura Ativa'
                       }
                     </p>
-                    <p className={`text-lg font-bold mt-0.5 ${subscriptionData.subscription.subscription_health === 'expired'
+                    <p className={`text-base font-bold ${subscriptionData.subscription.subscription_health === 'expired'
                         ? 'text-red-900 dark:text-red-100'
                         : subscriptionData.subscription.subscription_health === 'expiring_soon'
                           ? 'text-yellow-900 dark:text-yellow-100'
@@ -532,28 +532,28 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
                       }`}>
                       {format(new Date(subscriptionData.subscription.subscription_expiry_date + 'T00:00:00'), 'dd/MM/yyyy', { locale: ptBR })}
                     </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                    <p className="text-[10px] text-slate-600 dark:text-slate-400">
                       Sistema ativo
                     </p>
 
-                    {/* Botões de Suporte */}
-                    <div className="flex gap-2 mt-2">
+                    {/* Botões de Suporte - Compactos */}
+                    <div className="flex gap-1.5 mt-1.5">
                       <a
                         href="https://wa.me/5514997349352"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors text-xs font-medium"
+                        className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors text-[10px] font-medium"
                       >
-                        <MessageCircle className="h-3.5 w-3.5" />
+                        <MessageCircle className="h-3 w-3" />
                         WhatsApp
                       </a>
                       <a
                         href="https://t.me/+qLvYloISL-gyY2Yx"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors text-xs font-medium"
+                        className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-md transition-colors text-[10px] font-medium"
                       >
-                        <MessageSquare className="h-3.5 w-3.5" />
+                        <MessageSquare className="h-3 w-3" />
                         Telegram
                       </a>
                     </div>
