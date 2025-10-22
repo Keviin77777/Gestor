@@ -265,19 +265,38 @@ function handleDelete($pdo) {
       return;
     }
     
-    // Deletar revenda (CASCADE vai deletar clientes, faturas, etc.)
-    $stmt = $pdo->prepare("DELETE FROM resellers WHERE id = ?");
-    $stmt->execute([$data['id']]);
+    // Deletar de ambas as tabelas (users e resellers)
+    // CASCADE vai deletar clientes, faturas, templates, etc.
+    $pdo->beginTransaction();
     
-    echo json_encode([
-      'success' => true,
-      'message' => 'Revenda deletada com sucesso'
-    ]);
+    try {
+      // Deletar da tabela users (usada no login)
+      $stmt = $pdo->prepare("DELETE FROM users WHERE id = ?");
+      $stmt->execute([$data['id']]);
+      
+      // Deletar da tabela resellers
+      $stmt = $pdo->prepare("DELETE FROM resellers WHERE id = ?");
+      $stmt->execute([$data['id']]);
+      
+      // Deletar sessões ativas
+      $stmt = $pdo->prepare("DELETE FROM sessions WHERE user_id = ?");
+      $stmt->execute([$data['id']]);
+      
+      $pdo->commit();
+      
+      echo json_encode([
+        'success' => true,
+        'message' => 'Revenda deletada com sucesso'
+      ]);
+    } catch (Exception $e) {
+      $pdo->rollBack();
+      throw $e;
+    }
     
   } catch (Exception $e) {
     error_log("Erro ao deletar revenda: " . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['error' => 'Erro ao deletar revenda']);
+    echo json_encode(['error' => 'Erro ao deletar revenda: ' . $e->getMessage()]);
   }
 }
 
