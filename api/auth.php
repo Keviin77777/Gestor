@@ -125,9 +125,9 @@ function handleRegister(): void {
     beginTransaction();
     
     try {
-        // Calcular data de expiração do trial (3 dias completos a partir de amanhã)
-        // Exemplo: Criado em 10/10 às 20h -> Expira em 13/10 às 23:59:59
-        $trialExpiryDate = date('Y-m-d 23:59:59', strtotime('+3 days'));
+        // Calcular data de expiração do trial (3 dias = hoje + 2 dias)
+        // Exemplo: Criado em 21/10 -> Expira em 24/10 às 23:59:59 (dias 21, 22, 23 = 3 dias)
+        $trialExpiryDate = date('Y-m-d 23:59:59', strtotime('+2 days'));
         
         // Inserir em USERS (para foreign keys funcionarem)
         executeQuery(

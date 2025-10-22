@@ -64,11 +64,31 @@ function handleGet($pdo, $resellerId) {
         rs.id as subscription_id,
         rs.status as subscription_status,
         rs.start_date as subscription_start_date,
-        rsp.id as plan_id,
-        rsp.name as plan_name,
-        rsp.price as plan_price,
-        rsp.duration_days as plan_duration,
-        rsp.is_trial,
+        COALESCE(rsp.id, r.subscription_plan_id) as plan_id,
+        COALESCE(rsp.name, 
+          CASE 
+            WHEN r.subscription_plan_id = 'plan_trial' THEN 'Trial 3 Dias'
+            ELSE NULL
+          END
+        ) as plan_name,
+        COALESCE(rsp.price, 
+          CASE 
+            WHEN r.subscription_plan_id = 'plan_trial' THEN 0.00
+            ELSE NULL
+          END
+        ) as plan_price,
+        COALESCE(rsp.duration_days,
+          CASE 
+            WHEN r.subscription_plan_id = 'plan_trial' THEN 3
+            ELSE NULL
+          END
+        ) as plan_duration,
+        COALESCE(rsp.is_trial, 
+          CASE 
+            WHEN r.subscription_plan_id = 'plan_trial' THEN TRUE
+            ELSE FALSE
+          END
+        ) as is_trial,
         DATEDIFF(r.subscription_expiry_date, DATE(CONVERT_TZ(NOW(), '+00:00', '-03:00'))) as days_remaining,
         CASE 
           WHEN r.is_admin = 1 THEN 'active'
@@ -92,21 +112,78 @@ function handleGet($pdo, $resellerId) {
       return;
     }
     
-    // Buscar planos disponíveis (admin vê todos, revenda vê apenas ativos)
+    // Buscar planos disponíveis (TODOS os planos ativos)
     $stmt = $pdo->prepare("
-      SELECT id, name, duration_days, price, description, is_active, created_at
+      SELECT 
+        id, 
+        name, 
+        duration_days, 
+        price, 
+        description, 
+        is_active,
+        is_trial,
+        created_at
       FROM reseller_subscription_plans
-      ORDER BY duration_days ASC
+      WHERE is_active = TRUE
+      ORDER BY 
+        CASE 
+          WHEN is_trial = TRUE THEN 0
+          ELSE 1
+        END,
+        duration_days ASC
     ");
     
     $stmt->execute();
     $plans = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
-    // Converter is_active para boolean
+    // Converter is_active e is_trial para boolean
     foreach ($plans as &$plan) {
       $plan['is_active'] = (bool)$plan['is_active'];
+      $plan['is_trial'] = (bool)($plan['is_trial'] ?? false);
     }
     unset($plan);
+    
+    // Se não houver planos, adicionar planos padrão (fallback)
+    if (empty($plans)) {
+      $plans = [
+        [
+          'id' => 'plan_trial',
+          'name' => 'Trial 3 Dias',
+          'description' => 'Período de teste gratuito de 3 dias',
+          'price' => '0.00',
+          'duration_days' => 3,
+          'is_active' => true,
+          'is_trial' => true
+        ],
+        [
+          'id' => 'plan_monthly',
+          'name' => 'Plano Mensal',
+          'description' => 'Ideal para começar',
+          'price' => '39.90',
+          'duration_days' => 30,
+          'is_active' => true,
+          'is_trial' => false
+        ],
+        [
+          'id' => 'plan_semester',
+          'name' => 'Plano Semestral',
+          'description' => 'Economia de 16%',
+          'price' => '200.90',
+          'duration_days' => 180,
+          'is_active' => true,
+          'is_trial' => false
+        ],
+        [
+          'id' => 'plan_annual',
+          'name' => 'Plano Anual',
+          'description' => 'Melhor custo-benefício',
+          'price' => '380.90',
+          'duration_days' => 365,
+          'is_active' => true,
+          'is_trial' => false
+        ]
+      ];
+    }
     
     // Buscar histórico de pagamentos
     $stmt = $pdo->prepare("

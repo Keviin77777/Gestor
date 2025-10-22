@@ -1,44 +1,110 @@
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
+/**
+ * API pública para buscar planos de assinatura
+ * Retorna TODOS os planos (globais + customizados)
+ */
 export async function GET() {
   try {
     const apiUrl = process.env.NEXT_PUBLIC_PHP_API_URL || 'http://localhost:8080';
     
-    console.log('🔍 Buscando planos de:', `${apiUrl}/api/public-plans`);
-    
-    // Buscar planos da API PHP (sem autenticação para landing page pública)
-    const response = await fetch(`${apiUrl}/api/public-plans`, {
+    const response = await fetch(`${apiUrl}/api/reseller-subscription-plans/public`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
-      cache: 'no-store', // Sempre buscar dados frescos
+      cache: 'no-store',
     });
 
-    console.log('📥 Resposta da API PHP:', response.status);
-
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ Erro da API PHP:', errorText);
-      throw new Error('Erro ao buscar planos');
+      console.error('Erro ao buscar planos:', response.status);
+      // Retornar planos fallback
+      return NextResponse.json({
+        plans: [
+          {
+            id: 'plan_trial',
+            name: 'Trial 3 Dias',
+            description: 'Período de teste gratuito de 3 dias',
+            price: 0,
+            duration_days: 3,
+            is_trial: true,
+            is_active: true
+          },
+          {
+            id: 'plan_monthly',
+            name: 'Plano Mensal',
+            description: 'Ideal para começar',
+            price: 39.90,
+            duration_days: 30,
+            is_trial: false,
+            is_active: true
+          },
+          {
+            id: 'plan_semester',
+            name: 'Plano Semestral',
+            description: 'Economia de 16%',
+            price: 200.90,
+            duration_days: 180,
+            is_trial: false,
+            is_active: true
+          },
+          {
+            id: 'plan_annual',
+            name: 'Plano Anual',
+            description: 'Melhor custo-benefício',
+            price: 380.90,
+            duration_days: 365,
+            is_trial: false,
+            is_active: true
+          }
+        ]
+      });
     }
 
     const data = await response.json();
-    console.log('✅ Planos recebidos:', data.plans?.length || 0);
-    
     return NextResponse.json(data);
   } catch (error) {
-    console.error('❌ Erro ao buscar planos públicos:', error);
-    return NextResponse.json(
-      { 
-        success: false,
-        error: 'Erro ao buscar planos',
-        plans: [] 
-      },
-      { status: 200 } // Retornar 200 com array vazio para usar fallback
-    );
+    console.error('Erro ao buscar planos:', error);
+    // Retornar planos fallback em caso de erro
+    return NextResponse.json({
+      plans: [
+        {
+          id: 'plan_trial',
+          name: 'Trial 3 Dias',
+          description: 'Período de teste gratuito de 3 dias',
+          price: 0,
+          duration_days: 3,
+          is_trial: true,
+          is_active: true
+        },
+        {
+          id: 'plan_monthly',
+          name: 'Plano Mensal',
+          description: 'Ideal para começar',
+          price: 39.90,
+          duration_days: 30,
+          is_trial: false,
+          is_active: true
+        },
+        {
+          id: 'plan_semester',
+          name: 'Plano Semestral',
+          description: 'Economia de 16%',
+          price: 200.90,
+          duration_days: 180,
+          is_trial: false,
+          is_active: true
+        },
+        {
+          id: 'plan_annual',
+          name: 'Plano Anual',
+          description: 'Melhor custo-benefício',
+          price: 380.90,
+          duration_days: 365,
+          is_trial: false,
+          is_active: true
+        }
+      ]
+    });
   }
 }

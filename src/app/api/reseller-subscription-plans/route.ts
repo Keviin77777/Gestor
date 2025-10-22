@@ -1,49 +1,39 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
-export async function GET(request: NextRequest) {
+/**
+ * API para buscar planos de assinatura (requer autenticação)
+ * Retorna TODOS os planos (globais + customizados)
+ */
+export async function GET() {
   try {
-    // Tentar buscar do banco de dados via API PHP
-    const apiUrl = process.env.NEXT_PUBLIC_PHP_API_URL || 'http://localhost:8080';
-    const fullUrl = `${apiUrl}/api/reseller-subscription-plans`;
-    
-    console.log('Tentando buscar planos de:', fullUrl);
-    
-    try {
-      const response = await fetch(fullUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+    const cookieStore = cookies();
+    const token = cookieStore.get('auth_token')?.value;
 
-      console.log('Status da resposta:', response.status);
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Dados recebidos da API PHP:', data);
-        return NextResponse.json(data);
-      } else {
-        console.log('API PHP retornou erro:', response.status, response.statusText);
-      }
-    } catch (fetchError) {
-      console.log('Erro ao buscar da API PHP, usando fallback:', fetchError);
+    if (!token) {
+      return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
     }
 
-    // Fallback: retornar planos padrão se a API falhar
-    console.log('Usando planos fallback');
-    const fallbackPlans = [
-      { id: 'plan_trial', name: 'Trial 3 Dias', price: '0.00', duration_days: 3 },
-      { id: 'plan_monthly', name: 'Plano Mensal', price: '39.90', duration_days: 30 },
-      { id: 'plan_semester', name: 'Plano Semestral', price: '200.00', duration_days: 180 },
-      { id: 'plan_annual', name: 'Plano Anual', price: '380.00', duration_days: 365 }
-    ];
+    const apiUrl = process.env.NEXT_PUBLIC_PHP_API_URL || 'http://localhost:8080';
+    
+    const response = await fetch(`${apiUrl}/api/reseller-subscription-plans`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      cache: 'no-store',
+    });
 
-    return NextResponse.json({ plans: fallbackPlans });
+    if (!response.ok) {
+      console.error('Erro ao buscar planos:', response.status);
+      return NextResponse.json({ error: 'Erro ao buscar planos' }, { status: response.status });
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
   } catch (error) {
     console.error('Erro ao buscar planos:', error);
-    return NextResponse.json(
-      { error: 'Erro interno do servidor' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 });
   }
 }

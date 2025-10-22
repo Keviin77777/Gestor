@@ -429,7 +429,7 @@
   }
 
   /* Ensure dialog content doesn't overflow */
-  [role="dialog"] > * {
+  [role="dialog"]>* {
     max-width: 100%;
     overflow-x: hidden;
   }

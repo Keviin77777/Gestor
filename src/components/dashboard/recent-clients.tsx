@@ -37,7 +37,7 @@ export function RecentClients() {
           <div className="ml-auto font-medium">+R${(client.value || 0).toFixed(2)}</div>
         </div>
       ))}
-       {!recentClients?.length && <p className="text-sm text-muted-foreground">Nenhum cliente recente.</p>}
+      {!recentClients?.length && <p className="text-sm text-muted-foreground">Nenhum cliente recente.</p>}
     </div>
   );
 }
