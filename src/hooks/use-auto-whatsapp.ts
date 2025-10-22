@@ -295,7 +295,7 @@ _Mensagem automática do sistema GestPlay_`;
       const formattedNumber = formatBrazilianPhone(client.phone);
       const whatsappInstance3 = getInstanceName();
 
-      // Enviar mensagem
+      // Enviar mensagem (Evolution API v1.7.4 format)
       const sendResponse = await fetch(
         `${process.env.NEXT_PUBLIC_WHATSAPP_API_URL}/message/sendText/${whatsappInstance3}`,
         {
@@ -306,7 +306,9 @@ _Mensagem automática do sistema GestPlay_`;
           },
           body: JSON.stringify({
             number: formattedNumber,
-            text: message,
+            textMessage: {
+              text: message,
+            },
           }),
         }
       );
@@ -394,7 +396,7 @@ _Mensagem automática do sistema UltraGestor_`;
       const formattedNumber = formatBrazilianPhone(client.phone);
       const whatsappInstance2 = getInstanceName();
 
-      // Enviar mensagem
+      // Enviar mensagem (Evolution API v1.7.4 format)
       const sendResponse = await fetch(
         `${process.env.NEXT_PUBLIC_WHATSAPP_API_URL}/message/sendText/${whatsappInstance2}`,
         {
@@ -405,7 +407,9 @@ _Mensagem automática do sistema UltraGestor_`;
           },
           body: JSON.stringify({
             number: formattedNumber,
-            text: message,
+            textMessage: {
+              text: message,
+            },
           }),
         }
       );
