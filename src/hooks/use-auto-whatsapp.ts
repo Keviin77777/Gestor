@@ -143,7 +143,7 @@ export function useAutoWhatsApp(options: AutoWhatsAppOptions = {}) {
         // Chamar API PHP diretamente (mesmo padrão do mysql-api-client)
         const PHP_API_URL = process.env.NEXT_PUBLIC_PHP_API_URL || 'http://localhost:8080';
         const token = localStorage.getItem('token');
-        const templatesResponse = await fetch(`${PHP_API_URL}/whatsapp-templates?type=invoice&active=true`, {
+        const templatesResponse = await fetch(`${PHP_API_URL}/whatsapp-templates?active=true`, {
           headers: {
             'Authorization': token ? `Bearer ${token}` : '',
             'Content-Type': 'application/json',
@@ -161,23 +161,29 @@ export function useAutoWhatsApp(options: AutoWhatsAppOptions = {}) {
           const templatesArray = Array.isArray(templates) ? templates : [];
           
           // Tentar encontrar template de várias formas
-          let invoiceTemplate = templatesArray.find((t: any) => t.type === 'invoice' && t.is_active);
+          // Prioridade 1: payment_link (template de link de pagamento)
+          let invoiceTemplate = templatesArray.find((t: any) => 
+            (t.type === 'payment_link' || t.type === 'invoice') && t.is_active
+          );
           
-          // Se não encontrou, tentar por nome
+          // Prioridade 2: Buscar por nome se não encontrou
           if (!invoiceTemplate) {
             invoiceTemplate = templatesArray.find((t: any) => 
               (t.name?.toLowerCase().includes('fatura') || 
                t.name?.toLowerCase().includes('pagamento') ||
+               t.name?.toLowerCase().includes('link') ||
                t.name?.toLowerCase().includes('cobrança')) && 
               t.is_active
             );
             console.log('🔍 Buscando por nome, encontrado:', invoiceTemplate?.name || 'Nenhum');
           }
           
-          // Se não encontrou, pegar o primeiro ativo
+          // Prioridade 3: Buscar por trigger_event
           if (!invoiceTemplate) {
-            invoiceTemplate = templatesArray.find((t: any) => t.is_active);
-            console.log('🔍 Usando primeiro template ativo:', invoiceTemplate?.name || 'Nenhum');
+            invoiceTemplate = templatesArray.find((t: any) => 
+              t.trigger_event === 'invoice_generated' && t.is_active
+            );
+            console.log('🔍 Buscando por trigger_event, encontrado:', invoiceTemplate?.name || 'Nenhum');
           }
           
           console.log('🎯 Template selecionado:', invoiceTemplate?.name || 'Nenhum');
